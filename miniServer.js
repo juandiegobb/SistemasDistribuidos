@@ -68,7 +68,7 @@ app.listen(PORT, async () => {
 
     pulseInterval = setInterval(async () => {
       try {
-        await axios.post(`${MIDDLEWARE_URL}/heartbeat/${NAME}`);
+        await axios.post(`${MIDDLEWARE_URL}/pulse/${NAME}`);
         console.log("Pulso enviado");
       } catch (error) {
         console.log("Error al enviar pulso");

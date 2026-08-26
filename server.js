@@ -105,31 +105,31 @@ app.listen(PORT, () => {
 let messagesByServer = {};
 
 // POST /send-message/:name -> Recibir/Guardar mensaje para un servidor
-app.post("/send-message/:name", (req, res) => {
-  const { name } = req.params;
-  const { message } = req.body;
+// app.post("/send-message/:name", (req, res) => {
+//   const { name } = req.params;
+//   const { message } = req.body;
 
-  if (!message) {
-    return res.status(400).json({ error: "El campo 'message' es obligatorio" });
-  }
+//   if (!message) {
+//     return res.status(400).json({ error: "El campo 'message' es obligatorio" });
+//   }
 
-  if (!messagesByServer[name]) {
-    messagesByServer[name] = [];
-  }
+//   if (!messagesByServer[name]) {
+//     messagesByServer[name] = [];
+//   }
 
-  messagesByServer[name].push({
-    message,
-    timestamp: new Date().toISOString(),
-  });
+//   messagesByServer[name].push({
+//     message,
+//     timestamp: new Date().toISOString(),
+//   });
 
-  console.log(`[MENSAJE para ${name}]: ${message}`);
-  res.json({ status: "success", info: `Mensaje guardado para ${name}` });
-});
+//   console.log(`[MENSAJE para ${name}]: ${message}`);
+//   res.json({ status: "success", info: `Mensaje guardado para ${name}` });
+// });
 
-// GET /send-message/:name -> Ver mensajes de un servidor específico
-app.get("/send-message/:name", (req, res) => {
-  const { name } = req.params;
-  const messages = messagesByServer[name] || [];
+// // GET /send-message/:name -> Ver mensajes de un servidor específico
+// app.get("/send-message/:name", (req, res) => {
+//   const { name } = req.params;
+//   const messages = messagesByServer[name] || [];
 
-  res.json({ server: name, messages });
-});
+//   res.json({ server: name, messages });
+// });
