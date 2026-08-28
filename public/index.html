@@ -1,0 +1,1032 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Server de Juan Diego</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Ambient Glow & Grid -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="grid-overlay"></div>
+
+    <!-- Main App Container -->
+    <div class="app-layout">
+      <!-- TOP NAVBAR -->
+      <header class="navbar">
+        <div class="nav-left">
+          <div class="brand-logo">
+            <div class="logo-icon-wrap">
+              <svg
+                class="logo-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+                />
+              </svg>
+              <span class="logo-pulse"></span>
+            </div>
+            <div>
+              <div class="brand-title">
+                Server<span class="highlight">JuanDiego</span>
+              </div>
+              <div class="brand-subtitle">
+                Perdon por no poder asistir, espero funcione
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nav-center">
+          <div class="middleware-badge">
+            <span class="pulse-dot active"></span>
+            <span class="badge-text">Middleware Activo</span>
+            <span class="badge-port">Puerto :3000</span>
+          </div>
+          <div class="view-toggles">
+            <button
+              id="toggle-topology"
+              class="view-toggle-btn active"
+              title="Alternar vista del Mapa de Red"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="3"></circle>
+                <circle cx="19" cy="5" r="2"></circle>
+                <circle cx="5" cy="5" r="2"></circle>
+                <circle cx="19" cy="19" r="2"></circle>
+                <circle cx="5" cy="19" r="2"></circle>
+                <line x1="7" y1="6.5" x2="10" y2="10.5"></line>
+                <line x1="17" y1="6.5" x2="14" y2="10.5"></line>
+                <line x1="7" y1="17.5" x2="10" y2="13.5"></line>
+                <line x1="17" y1="17.5" x2="14" y2="13.5"></line>
+              </svg>
+              <span>Mapa de Red</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="nav-right">
+          <div class="live-clock-card">
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span id="live-clock">--:--:--</span>
+          </div>
+
+          <button
+            id="btn-guide"
+            class="btn btn-secondary"
+            title="Ver comandos de PowerShell y endpoints"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span>Guía de Conexión</span>
+          </button>
+
+          <button
+            id="btn-sim-message"
+            class="btn btn-outline-cyan"
+            title="Simular un mensaje recibido de un servidor"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+              ></path>
+            </svg>
+            <span>Simular Mensaje</span>
+          </button>
+
+          <button
+            id="btn-simulate"
+            class="btn btn-primary"
+            title="Registrar un servidor de prueba rápidamente"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>+ Conectar Nodo</span>
+          </button>
+
+          <button
+            id="btn-sound-toggle"
+            class="icon-button"
+            title="Activar/Desactivar Efectos Sonoros"
+          >
+            <svg
+              id="sound-icon-on"
+              viewBox="0 0 24 24"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+              <path
+                d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
+              ></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- METRICS OVERVIEW CARDS -->
+      <section class="metrics-grid">
+        <!-- Card 1: Servidores Conectados -->
+        <div class="metric-card glow-cyan">
+          <div class="metric-header">
+            <div class="metric-icon-box cyan">
+              <svg
+                viewBox="0 0 24 24"
+                width="22"
+                height="22"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                <line x1="6" y1="18" x2="6.01" y2="18"></line>
+              </svg>
+            </div>
+            <span class="metric-tag tag-emerald" id="tag-active-rate"
+              >100% Salud</span
+            >
+          </div>
+          <div class="metric-body">
+            <div class="metric-value-wrap">
+              <span class="metric-value" id="val-active-servers">0</span>
+              <span class="metric-unit"
+                >/ <span id="val-total-servers">0</span> Registrados</span
+              >
+            </div>
+            <div class="metric-label">Servidores Conectados en Red</div>
+          </div>
+          <div class="metric-footer">
+            <div class="pulse-indicator">
+              <span class="dot live"></span>
+              <span id="servers-status-summary"
+                >Esperando conexiones de servidores...</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: Mensajes Recibidos -->
+        <div class="metric-card glow-purple">
+          <div class="metric-header">
+            <div class="metric-icon-box purple">
+              <svg
+                viewBox="0 0 24 24"
+                width="22"
+                height="22"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                ></path>
+              </svg>
+            </div>
+            <span class="metric-tag tag-purple" id="tag-msg-rate"
+              >Tiempo Real</span
+            >
+          </div>
+          <div class="metric-body">
+            <div class="metric-value-wrap">
+              <span class="metric-value" id="val-total-messages">0</span>
+              <span class="metric-unit">mensajes</span>
+            </div>
+            <div class="metric-label">Mensajes Recibidos & Transmitidos</div>
+          </div>
+          <div class="metric-footer">
+            <div class="footer-info">
+              <svg
+                viewBox="0 0 24 24"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+              </svg>
+              <span id="last-message-time">Sin mensajes aún</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Monitoreo de Heartbeats -->
+        <div class="metric-card glow-emerald">
+          <div class="metric-header">
+            <div class="metric-icon-box emerald">
+              <svg
+                viewBox="0 0 24 24"
+                width="22"
+                height="22"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
+                ></path>
+              </svg>
+            </div>
+            <span class="metric-tag tag-emerald">Timeout: 15s</span>
+          </div>
+          <div class="metric-body">
+            <div class="metric-value-wrap">
+              <span class="metric-value" id="val-heartbeat-freq">5s</span>
+              <span class="metric-unit">frecuencia habitual</span>
+            </div>
+            <div class="metric-label">Pulsos de Vida (Heartbeats)</div>
+          </div>
+          <div class="metric-footer">
+            <div class="footer-info">
+              <span class="heartbeat-wave">
+                <span></span><span></span><span></span><span></span>
+              </span>
+              <span id="heartbeat-summary">Detección automática activa</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Uptime & Middleware -->
+        <div class="metric-card glow-amber">
+          <div class="metric-header">
+            <div class="metric-icon-box amber">
+              <svg
+                viewBox="0 0 24 24"
+                width="22"
+                height="22"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+            </div>
+            <span class="metric-tag tag-amber">Middleware :3000</span>
+          </div>
+          <div class="metric-body">
+            <div class="metric-value-wrap">
+              <span class="metric-value" id="val-uptime">0s</span>
+            </div>
+            <div class="metric-label">Tiempo de Actividad (Uptime)</div>
+          </div>
+          <div class="metric-footer">
+            <div class="footer-info">
+              <span class="status-indicator-mini online"></span>
+              <span>http://localhost:3000</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CLUSTER TOPOLOGY VISUALIZER (Interactive Canvas / Graph) -->
+      <section id="topology-section" class="panel topology-panel">
+        <div class="panel-header compact">
+          <div class="panel-title-wrap">
+            <div class="panel-icon-circle cyan">
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>
+              </svg>
+            </div>
+            <div>
+              <h3 class="panel-title-sm">Topología de la Red Distribuida</h3>
+              <p class="panel-desc-sm">
+                Visualización interactiva de nodos conectados con intercambio de
+                mensajes en tiempo real
+              </p>
+            </div>
+          </div>
+          <div class="topology-legend">
+            <span class="legend-item"
+              ><span class="legend-dot hub"></span> Middleware</span
+            >
+            <span class="legend-item"
+              ><span class="legend-dot node"></span> Servidor Activo</span
+            >
+            <span class="legend-item"
+              ><span class="legend-dot packet"></span> Flujo de Datos</span
+            >
+          </div>
+        </div>
+        <div class="topology-canvas-wrap">
+          <canvas id="topology-canvas" width="1200" height="220"></canvas>
+        </div>
+      </section>
+
+      <!-- MAIN TWO-COLUMN DASHBOARD CONTENT -->
+      <main class="dashboard-grid">
+        <!-- LEFT SECTION: SERVERS CLUSTER PANEL -->
+        <section class="panel servers-panel">
+          <div class="panel-header">
+            <div class="panel-title-wrap">
+              <div class="panel-icon-circle cyan">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                  <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                  <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                  <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                </svg>
+              </div>
+              <div>
+                <h2 class="panel-title">Servidores Conectados</h2>
+                <p class="panel-desc">
+                  Nodos registrados que envían pulsos (heartbeat) y reciben
+                  mensajes
+                </p>
+              </div>
+            </div>
+
+            <div class="panel-actions">
+              <div class="search-box">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="text"
+                  id="filter-servers"
+                  placeholder="Buscar servidor..."
+                />
+              </div>
+              <button
+                id="btn-refresh-servers"
+                class="icon-button"
+                title="Actualizar datos ahora"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <polyline points="1 20 1 14 7 14"></polyline>
+                  <path
+                    d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Server Cards Grid Container -->
+          <div class="panel-body">
+            <div id="servers-container" class="servers-grid">
+              <!-- Dynamic Server Cards will be injected here by JS -->
+            </div>
+
+            <!-- Empty State when no servers -->
+            <div id="servers-empty" class="empty-state hidden">
+              <div class="empty-icon-wrap cyan">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="40"
+                  height="40"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                >
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+                  <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+                  <line x1="6" y1="6" x2="6.01" y2="6"></line>
+                  <line x1="6" y1="18" x2="6.01" y2="18"></line>
+                </svg>
+              </div>
+              <h3>No hay servidores conectados</h3>
+              <p>Ejecuta en tu terminal:</p>
+              <div
+                class="quick-cmd-box"
+                data-copy="node miniServer.js 4000 ServerJuan"
+              >
+                <code>node miniServer.js 4000 ServerJuan</code>
+                <span class="cmd-copy-tag">Clic para copiar</span>
+              </div>
+              <p style="margin-top: 10px">
+                O conecta un nodo de prueba directamente con el botón:
+              </p>
+              <button id="btn-empty-simulate" class="btn btn-primary btn-sm">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="14"
+                  height="14"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="12" y1="5" x2="12" y2="19"></line>
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+                Conectar Servidor de Prueba
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- RIGHT SECTION: MESSAGES FEED & INTERACTIVE SENDER -->
+        <section class="panel messages-panel">
+          <div class="panel-header">
+            <div class="panel-title-wrap">
+              <div class="panel-icon-circle purple">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                  ></path>
+                </svg>
+              </div>
+              <div>
+                <h2 class="panel-title">Mensajes de los Servidores</h2>
+                <p class="panel-desc">
+                  Bandeja en tiempo real de mensajes entrantes, directos y de
+                  difusión
+                </p>
+              </div>
+            </div>
+
+            <div class="panel-actions">
+              <!-- Filter Dropdown -->
+              <div class="custom-select-wrap">
+                <select
+                  id="select-msg-filter"
+                  class="form-select-sm"
+                  title="Filtrar por remitente"
+                >
+                  <option value="all">Todos los Remitentes</option>
+                  <!-- Dynamic options by server injected by JS -->
+                </select>
+              </div>
+              <button
+                id="btn-clear-messages"
+                class="icon-button danger"
+                title="Vaciar historial de mensajes"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polyline points="3 6 5 6 21 6"></polyline>
+                  <path
+                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Message Filter Tabs / Chips -->
+          <div class="msg-tabs-bar">
+            <div class="msg-category-chips">
+              <button class="chip active" data-msg-type="all">
+                Todos (<span id="count-all-msgs">0</span>)
+              </button>
+              <button class="chip" data-msg-type="received">
+                De Servidores (<span id="count-node-msgs">0</span>)
+              </button>
+              <button class="chip" data-msg-type="outgoing">
+                Enviados / Directos
+              </button>
+              <button class="chip" data-msg-type="system">
+                Sistema & Eventos
+              </button>
+            </div>
+
+            <div class="msg-search-box">
+              <svg
+                viewBox="0 0 24 24"
+                width="13"
+                height="13"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              <input
+                type="text"
+                id="filter-msg-text"
+                placeholder="Filtrar texto..."
+              />
+            </div>
+          </div>
+
+          <!-- Messages Feed Container -->
+          <div class="messages-container" id="messages-list">
+            <!-- Dynamic Message Bubbles will be injected here by JS -->
+          </div>
+
+          <!-- Empty State when no messages -->
+          <div id="messages-empty" class="empty-state hidden">
+            <div class="empty-icon-wrap purple">
+              <svg
+                viewBox="0 0 24 24"
+                width="36"
+                height="36"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path
+                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+                ></path>
+              </svg>
+            </div>
+            <h3>Sin mensajes en el registro</h3>
+            <p>
+              Los mensajes enviados por <code>miniServer.js</code> o peticiones
+              HTTP se mostrarán aquí al instante.
+            </p>
+            <div class="empty-actions">
+              <button id="btn-quick-sim-msg" class="btn btn-secondary btn-sm">
+                Enviar Mensaje de Prueba
+              </button>
+            </div>
+          </div>
+
+          <!-- Interactive Send Message Box -->
+          <div class="message-composer">
+            <!-- Quick Templates Bar -->
+            <div class="templates-bar">
+              <span class="templates-label">Plantillas rápidas:</span>
+              <button
+                type="button"
+                class="btn-template"
+                data-tpl="Hola Middleware, el servidor está operando al 100%"
+              >
+                Saludo de Servidor
+              </button>
+              <button
+                type="button"
+                class="btn-template"
+                data-tpl="Procesando lote de datos #1024 - Estado OK"
+              >
+                Reporte de Lote
+              </button>
+              <button
+                type="button"
+                class="btn-template"
+                data-tpl="PING: Verificación de latencia y conectividad"
+              >
+                Ping Test
+              </button>
+              <button
+                type="button"
+                class="btn-template"
+                data-tpl="Alerta: Carga de CPU al 85% en nodo de cómputo"
+              >
+                Advertencia de Carga
+              </button>
+            </div>
+
+            <form id="form-send-message" class="composer-form">
+              <div class="composer-top-row">
+                <div class="field-inline">
+                  <label for="msg-sender-name">De (Remitente):</label>
+                  <input
+                    type="text"
+                    id="msg-sender-name"
+                    class="input-inline"
+                    value="Admin-Dashboard"
+                    placeholder="Tu nombre o nodo..."
+                  />
+                </div>
+                <div class="field-inline">
+                  <label for="msg-target-node">Para (Destino):</label>
+                  <select id="msg-target-node" class="select-inline">
+                    <option value="Middleware">
+                      Middleware (General /messages)
+                    </option>
+                    <!-- Dynamic server options -->
+                  </select>
+                </div>
+              </div>
+
+              <div class="composer-bottom-row">
+                <input
+                  type="text"
+                  id="msg-content-input"
+                  class="composer-input"
+                  placeholder="Escribe un mensaje para transmitir por la red..."
+                  required
+                  autocomplete="off"
+                />
+                <button type="submit" class="btn btn-primary btn-send">
+                  <span>Enviar</span>
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </main>
+
+      <!-- FOOTER -->
+      <footer class="app-footer">
+        <div class="footer-left-info">
+          <span
+            >Sistemas Distribuidos •
+            <strong>Middleware Monitor v2.0</strong></span
+          >
+          <span class="sep">•</span>
+          <span
+            >Endpoints: <code>/register</code>, <code>/heartbeat/:name</code>,
+            <code>/send-message/:name</code>, <code>/messages</code></span
+          >
+        </div>
+        <div class="footer-status-pill">
+          <span class="pulse-dot active"></span>
+          <span>Sincronización en vivo: <strong>1.5s</strong></span>
+        </div>
+      </footer>
+    </div>
+
+    <!-- MODAL: GUÍA DE COMANDOS & INTEGRACIÓN -->
+    <div id="modal-guide" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-box">
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path
+                d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+              ></path>
+            </svg>
+            <h3>Guía de Integración & Comandos</h3>
+          </div>
+          <button class="modal-close" data-close-modal>&times;</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="modal-intro">
+            Usa estos comandos en tu terminal de PowerShell o CMD para conectar
+            servidores y enviar mensajes al Middleware:
+          </p>
+
+          <div class="guide-section">
+            <div class="guide-section-header">
+              <span class="step-num">1</span>
+              <h4>Iniciar un miniServer local (Servidor nodo)</h4>
+            </div>
+            <p class="guide-desc">
+              Inicia un servidor en el puerto 4000 con el nombre 'ServerJuan' y
+              se conecta automáticamente al Middleware:
+            </p>
+            <div class="code-block">
+              <code>node miniServer.js 4000 ServerJuan</code>
+              <button
+                class="btn-copy"
+                data-copy="node miniServer.js 4000 ServerJuan"
+              >
+                Copiar
+              </button>
+            </div>
+          </div>
+
+          <div class="guide-section">
+            <div class="guide-section-header">
+              <span class="step-num">2</span>
+              <h4>Iniciar múltiples servidores simultáneos</h4>
+            </div>
+            <p class="guide-desc">
+              Abre otra terminal para correr otro nodo en paralelo:
+            </p>
+            <div class="code-block">
+              <code>node miniServer.js 4001 ServerMaria</code>
+              <button
+                class="btn-copy"
+                data-copy="node miniServer.js 4001 ServerMaria"
+              >
+                Copiar
+              </button>
+            </div>
+          </div>
+
+          <div class="guide-section">
+            <div class="guide-section-header">
+              <span class="step-num">3</span>
+              <h4>Enviar mensaje desde la terminal (`/messages`)</h4>
+            </div>
+            <div class="code-block">
+              <code
+                >curl -X POST http://localhost:3000/messages -H "Content-Type:
+                application/json" -d "{\"sender\": \"ServerJuan\", \"message\":
+                \"¡Hola desde mi servidor!\"}"</code
+              >
+              <button
+                class="btn-copy"
+                data-copy='curl -X POST http://localhost:3000/messages -H "Content-Type: application/json" -d "{\"sender\": \"ServerJuan\", \"message\": \"¡Hola desde mi servidor!\"}"'
+              >
+                Copiar
+              </button>
+            </div>
+          </div>
+
+          <div class="guide-section">
+            <div class="guide-section-header">
+              <span class="step-num">4</span>
+              <h4>Enviar mensaje dirigido (`/send-message/:name`)</h4>
+            </div>
+            <div class="code-block">
+              <code
+                >curl -X POST http://localhost:3000/send-message/ServerJuan -H
+                "Content-Type: application/json" -d "{\"sender\":
+                \"Cliente_01\", \"message\": \"Tarea distribuida
+                completada\"}"</code
+              >
+              <button
+                class="btn-copy"
+                data-copy='curl -X POST http://localhost:3000/send-message/ServerJuan -H "Content-Type: application/json" -d "{\"sender\": \"Cliente_01\", \"message\": \"Tarea distribuida completada\"}"'
+              >
+                Copiar
+              </button>
+            </div>
+          </div>
+
+          <div class="guide-section">
+            <div class="guide-section-header">
+              <span class="step-num">5</span>
+              <h4>Enviar Heartbeat manual</h4>
+            </div>
+            <div class="code-block">
+              <code
+                >curl -X POST http://localhost:3000/heartbeat/ServerJuan</code
+              >
+              <button
+                class="btn-copy"
+                data-copy="curl -X POST http://localhost:3000/heartbeat/ServerJuan"
+              >
+                Copiar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-primary" data-close-modal>Entendido</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: CONECTAR / SIMULAR NODO -->
+    <div id="modal-simulate" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-box">
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <h3>Registrar Servidor en la Red</h3>
+          </div>
+          <button class="modal-close" data-close-modal>&times;</button>
+        </div>
+
+        <form id="form-simulate-node">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="sim-node-name">Nombre del Servidor</label>
+              <input
+                type="text"
+                id="sim-node-name"
+                class="form-control"
+                placeholder="ej. ServerJuan, Node-Alpha, ServerBogota"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="sim-node-url">URL / Puerto del Servidor</label>
+              <input
+                type="text"
+                id="sim-node-url"
+                class="form-control"
+                value="http://localhost:4000"
+                placeholder="http://localhost:4000"
+                required
+              />
+            </div>
+            <div class="form-group checkbox-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="sim-auto-heartbeat" checked />
+                <span
+                  >Enviar pulsos (heartbeat) automáticos cada 5 segundos para
+                  mantenerlo activo</span
+                >
+              </label>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal>
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary">
+              Registrar y Conectar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- MODAL: SIMULAR MENSAJE ENTRANTE -->
+    <div id="modal-sim-message" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-box">
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+              ></path>
+            </svg>
+            <h3>Simular Mensaje Entrante desde un Servidor</h3>
+          </div>
+          <button class="modal-close" data-close-modal>&times;</button>
+        </div>
+
+        <form id="form-modal-sim-msg">
+          <div class="modal-body">
+            <div class="form-group">
+              <label for="sim-msg-sender"
+                >Servidor / Remitente que envía el mensaje:</label
+              >
+              <input
+                type="text"
+                id="sim-msg-sender"
+                class="form-control"
+                placeholder="ej. ServerJuan, Node-01"
+                value="ServerJuan"
+                required
+              />
+            </div>
+            <div class="form-group">
+              <label for="sim-msg-route">Ruta / Endpoint:</label>
+              <select id="sim-msg-route" class="form-control">
+                <option value="messages">
+                  POST /messages (General al Middleware)
+                </option>
+                <option value="send-message">
+                  POST /send-message/:name (Dirigido a nodo)
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="sim-msg-text">Contenido del Mensaje:</label>
+              <textarea
+                id="sim-msg-text"
+                class="form-control"
+                rows="3"
+                placeholder="Escribe el mensaje que el servidor transmite..."
+                required
+              >
+¡Hola! Servidor reportando estado de conexión normal.</textarea
+              >
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-close-modal>
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary">
+              Transmitir Mensaje
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS CONTAINER -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- JS SCRIPT -->
+    <script src="app.js"></script>
+  </body>
+</html>

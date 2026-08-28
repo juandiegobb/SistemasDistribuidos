@@ -9,7 +9,7 @@ app.use(express.json());
 const PORT = process.argv[2];
 const NAME = process.argv[3];
 
-const MIDDLEWARE_URL = "http://localhost:3000";
+const MIDDLEWARE_URL = "https://elinor-globose-jonah.ngrok-free.dev";
 let pulseInterval;
 
 // ROOT
@@ -68,7 +68,7 @@ app.listen(PORT, async () => {
 
     pulseInterval = setInterval(async () => {
       try {
-        await axios.post(`${MIDDLEWARE_URL}/pulse/${NAME}`);
+        await axios.post(`${MIDDLEWARE_URL}/heartbeat/${NAME}`);
         console.log("Pulso enviado");
       } catch (error) {
         console.log("Error al enviar pulso");
