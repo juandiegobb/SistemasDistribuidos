@@ -9,7 +9,7 @@ app.use(express.json());
 const PORT = process.argv[2];
 const NAME = process.argv[3];
 
-const MIDDLEWARE_URL = "https://elinor-globose-jonah.ngrok-free.dev";
+let MIDDLEWARE_URL = "http://localhost:3000";
 let pulseInterval;
 
 // ROOT
@@ -27,6 +27,23 @@ app.post("/shutdown", (req, res) => {
 
   res.json({ message: `${NAME} dejó de enviar pulsos` });
 });
+
+// MATAR SERVIDOR (Finaliza el proceso por completo)
+const handleKill = (req, res) => {
+  console.log(`[KILL] Servidor ${NAME} apagándose por completo...`);
+  if (pulseInterval) {
+    clearInterval(pulseInterval);
+    pulseInterval = null;
+  }
+  res.json({ message: `${NAME} ha sido detenido y el proceso ha finalizado` });
+  setTimeout(() => {
+    process.exit(0);
+  }, 500);
+};
+
+app.post("/kill", handleKill);
+app.get("/kill", handleKill);
+app.post("/kill-server", handleKill);
 
 // SEND MESSAGE
 app.post("/send-message", async (req, res) => {
@@ -54,21 +71,86 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
+// HOTRELOAD - CAMBIAR URL PADRE
+const updateParentUrl = async (req, res) => {
+  const { newParentUrl } = req.body;
+
+  if (!newParentUrl) {
+    return res.status(400).json({ error: "El campo 'newParentUrl' es obligatorio" });
+  }
+
+  // 1. Actualizar la variable local MIDDLEWARE_URL
+  MIDDLEWARE_URL = newParentUrl;
+
+  // 2. Reiniciar el intervalo de heartbeats apuntando a la nueva dirección
+  if (pulseInterval) {
+    clearInterval(pulseInterval);
+  }
+  pulseInterval = setInterval(async () => {
+    try {
+      await axios.post(
+        `${MIDDLEWARE_URL}/heartbeat/${NAME}`,
+        {},
+        {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        }
+      );
+      console.log("Pulso enviado");
+    } catch (error) {
+      console.log("Error al enviar pulso");
+    }
+  }, 5000);
+
+  // 3. Ejecutar de inmediato una petición POST /register contra el nuevo padre con las cabeceras de ngrok correspondientes
+  try {
+    await axios.post(
+      `${MIDDLEWARE_URL}/register`,
+      {
+        name: NAME,
+        url: `https://elinor-globose-jonah.ngrok-free.dev`,
+      },
+      {
+        headers: { "ngrok-skip-browser-warning": "true" },
+      }
+    );
+    console.log("Registrado sog");
+  } catch (error) {
+    console.log("Error al registrar sog");
+  }
+
+  res.json({ message: `URL padre actualizada a ${MIDDLEWARE_URL}` });
+};
+
+app.put("/config", updateParentUrl);
+app.post("/update-parent-url", updateParentUrl);
+
 // SERVER
 app.listen(PORT, async () => {
   console.log(`Server corriendo en http://localhost:${PORT}`);
 
   try {
-    await axios.post(`${MIDDLEWARE_URL}/register`, {
-      name: NAME,
-      url: `https://elinor-globose-jonah.ngrok-free.dev`,
-    });
+    await axios.post(
+      `${MIDDLEWARE_URL}/register`,
+      {
+        name: NAME,
+        url: `https://elinor-globose-jonah.ngrok-free.dev`,
+      },
+      {
+        headers: { "ngrok-skip-browser-warning": "true" },
+      }
+    );
 
     console.log("Registrado sog");
 
     pulseInterval = setInterval(async () => {
       try {
-        await axios.post(`${MIDDLEWARE_URL}/heartbeat/${NAME}`);
+        await axios.post(
+          `${MIDDLEWARE_URL}/heartbeat/${NAME}`,
+          {},
+          {
+            headers: { "ngrok-skip-browser-warning": "true" },
+          }
+        );
         console.log("Pulso enviado");
       } catch (error) {
         console.log("Error al enviar pulso");

@@ -111,12 +111,36 @@ app.post("/heartbeat/:name", (req, res) => {
   res.status(400).json({ error: "Server not found" });
 });
 
+// Actualizar dinámicamente la URL registrada de un hijo
+app.put("/servers/:name/url", (req, res) => {
+  const { name } = req.params;
+  const { url } = req.body;
+
+  if (!servers[name]) {
+    return res.status(404).json({ error: "server not found" });
+  }
+
+  if (!url) {
+    return res.status(400).json({ error: "El campo 'url' es obligatorio" });
+  }
+
+  servers[name].url = url;
+  res.json({ message: "URL actualizada", server: servers[name] });
+});
+
 // Eliminar / Matar Servidor
-app.post("/kill-server/:name", (req, res) => {
+app.post("/kill-server/:name", async (req, res) => {
   const { name } = req.params;
 
   if (!servers[name] && !serverProcesses[name]) {
     return res.status(400).json({ error: "server not found" });
+  }
+
+  // Notificar al proceso del miniServer para que se apague
+  if (servers[name]?.url) {
+    try {
+      fetch(`${servers[name].url}/kill`, { method: "POST" }).catch(() => {});
+    } catch (e) {}
   }
 
   if (serverProcesses[name]?.process) {
@@ -147,7 +171,9 @@ app.get("/servers", (req, res) => {
   const serverList = Object.values(servers).map((s) => ({
     ...s,
     ageSeconds: Math.floor((now - s.lastHeartbeat) / 1000),
-    isHealthy: now - s.lastHeartbeat <= 15000,
+    elapsedSeconds: Math.floor((now - s.lastHeartbeat) / 1000),
+    isOnline: s.status === "active" && now - s.lastHeartbeat <= 15000,
+    isHealthy: s.status === "active" && now - s.lastHeartbeat <= 15000,
   }));
   res.json(serverList);
 });
@@ -260,7 +286,7 @@ app.get("/api/stats", (req, res) => {
   const now = Date.now();
   const serverValues = Object.values(servers);
   const activeCount = serverValues.filter(
-    (s) => now - s.lastHeartbeat <= 15000,
+    (s) => s.status === "active" && now - s.lastHeartbeat <= 15000,
   ).length;
 
   res.json({
@@ -273,9 +299,10 @@ app.get("/api/stats", (req, res) => {
     serverList: serverValues.map((s) => ({
       name: s.name,
       url: s.url,
+      status: s.status,
       lastHeartbeat: s.lastHeartbeat,
       elapsedSeconds: Math.floor((now - s.lastHeartbeat) / 1000),
-      isOnline: now - s.lastHeartbeat <= 15000,
+      isOnline: s.status === "active" && now - s.lastHeartbeat <= 15000,
       heartbeatCount: s.heartbeatCount || 1,
     })),
   });
@@ -305,22 +332,25 @@ setInterval(() => {
 
   Object.keys(servers).forEach((name) => {
     if (now - servers[name].lastHeartbeat > timeout) {
-      console.log(`Server ${name} timed out. Killing...`);
+      if (servers[name].status !== "offline") {
+        console.log(`Server ${name} timed out. Marcado como offline.`);
+        servers[name].status = "offline";
 
-      recordMessage({
-        sender: "Sistema",
-        message: `Servidor [${name}] desconectado por inactividad (>15s sin pulso)`,
-        target: name,
-        type: "system_alert",
-      });
+        recordMessage({
+          sender: "Sistema",
+          message: `Servidor [${name}] desconectado por inactividad (>15s sin pulso)`,
+          target: name,
+          type: "system_alert",
+        });
+      }
 
       if (serverProcesses[name]) {
         try {
           serverProcesses[name].process.kill();
-        } catch (e) {}
+        } catch (e) { }
         delete serverProcesses[name];
       }
-      delete servers[name];
+      // Se eliminó el delete servers[name] para mantener el nodo persistente como offline
     }
   });
 }, 10000);
