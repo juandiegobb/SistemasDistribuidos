@@ -4,6 +4,17 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
+// Habilitar CORS
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, ngrok-skip-browser-warning");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 const PORT = Number(process.argv[2]) || 4000;
 const NAME = process.argv[3] || "worker-1";
 let MY_WORKER_URL = `http://localhost:${PORT}`;

@@ -6,6 +6,18 @@ const axios = require("axios");
 const app = express();
 
 app.use(express.json());
+
+// Habilitar CORS para permitir consultas cruzadas entre coordinadores y el dashboard web
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, ngrok-skip-browser-warning");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // Servir archivos estáticos del dashboard visual
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -28,19 +40,16 @@ function logCoord(message) {
   console.log(`[${NODE_ID}:${PORT}] [${ts}] [INFO] [COORDINATOR] ${message}`);
 }
 
-// Preset de nodos del cluster LAN si no se especifican otros
-const PRESET_LAN_NODES = [
-  { id: "A", port: 3000, url: "http://localhost:3000" },
-  { id: "B", port: 3001, url: "http://localhost:3001" },
-  { id: "C", port: 3002, url: "http://localhost:3002" },
-];
+// Puertos locales estándar para auto-descubrimiento en localhost
+const LOCAL_DISCOVERY_PORTS = [3000, 3001, 3002, 3003];
 
-PRESET_LAN_NODES.forEach((preset) => {
-  if (preset.url !== MY_URL && preset.port !== PORT) {
-    if (!peers[preset.url]) {
-      peers[preset.url] = {
-        id: preset.id,
-        url: preset.url,
+LOCAL_DISCOVERY_PORTS.forEach((p) => {
+  const url = `http://localhost:${p}`;
+  if (url !== MY_URL && p !== PORT) {
+    if (!peers[url]) {
+      peers[url] = {
+        id: null,
+        url: url,
         lastSeen: 0,
       };
     }
@@ -64,8 +73,11 @@ function getLeaderUrl() {
   if (currentLeader === NODE_ID) return MY_URL;
   const peer = Object.values(peers).find((p) => p.id === currentLeader);
   if (peer && peer.url) return peer.url;
-  const preset = PRESET_LAN_NODES.find((p) => p.id === currentLeader);
-  if (preset) return preset.url;
+  const charCode = String(currentLeader).toUpperCase().charCodeAt(0);
+  if (charCode >= 65 && charCode <= 90) {
+    const portGuess = 3000 + (charCode - 65);
+    return `http://localhost:${portGuess}`;
+  }
   return null;
 }
 
@@ -444,21 +456,10 @@ function isHigherPriority(id1, id2) {
 function isPeerLeader(peerUrl) {
   if (!currentLeader) return false;
   if (peers[peerUrl]?.id === currentLeader) return true;
-  const preset = PRESET_LAN_NODES.find((p) => p.id === currentLeader);
-  if (preset && peerUrl.includes(`:${preset.port}`)) return true;
   return false;
 }
 
-// Obtener la dirección URL del líder actual
-function getLeaderUrl() {
-  if (!currentLeader) return null;
-  if (currentLeader === NODE_ID) return MY_URL;
-  const peer = Object.values(peers).find((p) => p.id === currentLeader);
-  if (peer && peer.url) return peer.url;
-  const preset = PRESET_LAN_NODES.find((p) => p.id === currentLeader);
-  if (preset) return preset.url;
-  return null;
-}
+
 
 let lastLoggedLeader = null;
 let lastLoggedTerm = -1;
@@ -555,14 +556,57 @@ app.post("/election/ping", (req, res) => {
           lastSeen: 0,
         };
         logCoord(`Peer aprendido por propagación: ${peerUrl}`);
+
+        // Handshake inmediato para sincronizar estado con el peer recién descubierto
+        axios.post(`${peerUrl}/election/ping`, {
+          from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
+          peers: Object.keys(peers),
+        }, { timeout: 1200 }).then((resp) => {
+          if (peers[peerUrl]) {
+            peers[peerUrl].lastSeen = Date.now();
+            if (resp.data?.from?.id) peers[peerUrl].id = resp.data.from.id;
+          }
+          if (resp.data?.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
+            setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
+          } else if (role === "leader") {
+            sendElectionMessage(peerUrl, {
+              type: "COORDINATOR",
+              from: { id: NODE_ID, url: MY_URL },
+              payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
+            });
+          }
+        }).catch(() => {});
       }
     });
+  }
+
+  // Reconciliación de liderazgo Bully al recibir ping
+  const senderRole = from.role;
+  const senderTerm = from.term || 0;
+
+  if (senderRole === "leader") {
+    if (isHigherPriority(NODE_ID, senderId)) {
+      // Yo tengo mayor jerarquía que el líder emisor: debo desafiarlo
+      if (!electionInProgress && role !== "candidate") {
+        setTimeout(() => startElection("bully_superior_node"), 100);
+      }
+    } else if (NODE_ID !== senderId) {
+      // El líder emisor es superior o igual: lo reconozco
+      if (currentLeader !== senderId || role === "leader") {
+        setLeader(senderId, senderTerm, "bully", { fromElection: false });
+      }
+    }
+  } else if (role === "leader" && isHigherPriority(senderId, NODE_ID)) {
+    // Si yo era líder pero el emisor es de mayor jerarquía, cedo el liderazgo
+    if (!electionInProgress) {
+      setTimeout(() => startElection("higher_peer_detected"), 100);
+    }
   }
 
   // Responder con acuse de recibo, identidad, rol, líder y término actual
   res.json({
     ok: true,
-    from: { id: NODE_ID, url: MY_URL },
+    from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
     role,
     currentLeader,
     currentTerm,
@@ -836,12 +880,8 @@ async function checkInitialLeader() {
       setLeader(foundLeader, foundLeaderTerm, "bully", { fromElection: false });
     }
   } else {
-    // Si no hay líder activo detectado:
-    // Solo el nodo de mayor jerarquía del cluster (ej. C) se proclama líder inicial
-    const higherPeers = Object.values(peers).filter((p) => p.id && isHigherPriority(p.id, NODE_ID));
-    if (higherPeers.length === 0) {
-      startElection("initial_election");
-    }
+    // Si no hay líder activo detectado en la red, iniciar algoritmo Bully inmediatamente
+    startElection("initial_election");
   }
 }
 
@@ -853,7 +893,7 @@ async function sendPeerPings() {
   if (peerUrls.length === 0) return;
 
   const payload = {
-    from: { id: NODE_ID, url: MY_URL },
+    from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
     peers: peerUrls,
   };
 
@@ -872,13 +912,27 @@ async function sendPeerPings() {
 
       // Si el peer es el líder y tiene un término válido
       if (response.data?.role === "leader" && response.data?.currentLeader) {
-        if (currentLeader !== response.data.currentLeader && !electionInProgress) {
-          setLeader(
-            response.data.currentLeader,
-            response.data.currentTerm !== undefined ? response.data.currentTerm : currentTerm,
-            "bully",
-            { fromElection: false }
-          );
+        const reportedLeader = response.data.currentLeader;
+        const reportedTerm = response.data.currentTerm !== undefined ? response.data.currentTerm : currentTerm;
+
+        if (isHigherPriority(NODE_ID, reportedLeader)) {
+          // Yo tengo mayor jerarquía que el líder reportado: ¡Desafío de Bully!
+          if (!electionInProgress && role !== "candidate") {
+            startElection("bully_superior_node");
+          }
+        } else if (NODE_ID !== reportedLeader) {
+          // El líder reportado tiene mayor jerarquía: lo reconozco
+          if (currentLeader !== reportedLeader || role === "leader") {
+            setLeader(reportedLeader, reportedTerm, "bully", { fromElection: false });
+          }
+        }
+      } else if (response.data?.from?.id) {
+        // Si el peer no es líder pero tiene mayor jerarquía que yo y yo me creía líder:
+        const peerId = response.data.from.id;
+        if (role === "leader" && isHigherPriority(peerId, NODE_ID)) {
+          if (!electionInProgress) {
+            startElection("higher_peer_detected");
+          }
         }
       }
 
@@ -892,6 +946,23 @@ async function sendPeerPings() {
               lastSeen: 0,
             };
             logCoord(`Nuevo peer descubierto vía respuesta de ${peerUrl}: ${discoveredUrl}`);
+
+            // Sincronización inmediata con el nuevo peer
+            axios.post(`${discoveredUrl}/election/ping`, payload, { timeout: 1200 }).then((resp) => {
+              if (peers[discoveredUrl]) {
+                peers[discoveredUrl].lastSeen = Date.now();
+                if (resp.data?.from?.id) peers[discoveredUrl].id = resp.data.from.id;
+              }
+              if (resp.data?.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
+                setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
+              } else if (role === "leader") {
+                sendElectionMessage(discoveredUrl, {
+                  type: "COORDINATOR",
+                  from: { id: NODE_ID, url: MY_URL },
+                  payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
+                });
+              }
+            }).catch(() => {});
           }
         });
       }

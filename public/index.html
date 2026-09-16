@@ -1,1032 +1,1200 @@
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Server de Juan Diego</title>
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Centro de Control Unificado del Clúster | Sistemas Distribuidos</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              900: '#0c4a6e',
+            },
+            surface: {
+              800: '#1e293b',
+              850: '#172033',
+              900: '#0f172a',
+              950: '#090d16',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+          animation: {
+            'pulse-fast': 'pulse 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
+          }
+        }
+      }
+    }
+  </script>
 
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-    <!-- CSS -->
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <!-- Ambient Glow & Grid -->
-    <div class="bg-glow bg-glow-1"></div>
-    <div class="bg-glow bg-glow-2"></div>
-    <div class="grid-overlay"></div>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #090d16;
+      color: #f1f5f9;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Custom subtle glassmorphism */
+    .glass-card {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card-leader {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(15, 23, 42, 0.85) 100%);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      box-shadow: 0 0 25px rgba(16, 185, 129, 0.15);
+    }
+    .glass-card-offline {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(15, 23, 42, 0.85) 100%);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
 
-    <!-- Main App Container -->
-    <div class="app-layout">
-      <!-- TOP NAVBAR -->
-      <header class="navbar">
-        <div class="nav-left">
-          <div class="brand-logo">
-            <div class="logo-icon-wrap">
-              <svg
-                class="logo-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-                />
-              </svg>
-              <span class="logo-pulse"></span>
-            </div>
-            <div>
-              <div class="brand-title">
-                Server<span class="highlight">JuanDiego</span>
-              </div>
-              <div class="brand-subtitle">
-                Perdon por no poder asistir, espero funcione
-              </div>
-            </div>
-          </div>
+  <!-- Glow effects in background -->
+  <div class="fixed top-0 left-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+  <div class="fixed bottom-0 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+
+  <!-- TOP NAVBAR -->
+  <header class="border-b border-slate-800 bg-surface-900/80 backdrop-blur-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center gap-3">
+        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-sky-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+          <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
         </div>
-
-        <div class="nav-center">
-          <div class="middleware-badge">
-            <span class="pulse-dot active"></span>
-            <span class="badge-text">Middleware Activo</span>
-            <span class="badge-port">Puerto :3000</span>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold text-white tracking-tight">Centro de Control Unificado</h1>
+            <span class="px-2 py-0.5 text-xs font-semibold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded-full">Bully Cluster</span>
           </div>
-          <div class="view-toggles">
-            <button
-              id="toggle-topology"
-              class="view-toggle-btn active"
-              title="Alternar vista del Mapa de Red"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="15"
-                height="15"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <circle cx="12" cy="12" r="3"></circle>
-                <circle cx="19" cy="5" r="2"></circle>
-                <circle cx="5" cy="5" r="2"></circle>
-                <circle cx="19" cy="19" r="2"></circle>
-                <circle cx="5" cy="19" r="2"></circle>
-                <line x1="7" y1="6.5" x2="10" y2="10.5"></line>
-                <line x1="17" y1="6.5" x2="14" y2="10.5"></line>
-                <line x1="7" y1="17.5" x2="10" y2="13.5"></line>
-                <line x1="17" y1="17.5" x2="14" y2="13.5"></line>
-              </svg>
-              <span>Mapa de Red</span>
-            </button>
-          </div>
+          <p class="text-xs text-slate-400">Monitoreo distribuido y conmutación automática de líderes</p>
         </div>
+      </div>
 
-        <div class="nav-right">
-          <div class="live-clock-card">
-            <svg
-              viewBox="0 0 24 24"
-              width="14"
-              height="14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
-            <span id="live-clock">--:--:--</span>
-          </div>
-
-          <button
-            id="btn-guide"
-            class="btn btn-secondary"
-            title="Ver comandos de PowerShell y endpoints"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-              <line x1="12" y1="17" x2="12.01" y2="17"></line>
-            </svg>
-            <span>Guía de Conexión</span>
-          </button>
-
-          <button
-            id="btn-sim-message"
-            class="btn btn-outline-cyan"
-            title="Simular un mensaje recibido de un servidor"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="15"
-              height="15"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-              ></path>
-            </svg>
-            <span>Simular Mensaje</span>
-          </button>
-
-          <button
-            id="btn-simulate"
-            class="btn btn-primary"
-            title="Registrar un servidor de prueba rápidamente"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span>+ Conectar Nodo</span>
-          </button>
-
-          <button
-            id="btn-sound-toggle"
-            class="icon-button"
-            title="Activar/Desactivar Efectos Sonoros"
-          >
-            <svg
-              id="sound-icon-on"
-              viewBox="0 0 24 24"
-              width="18"
-              height="18"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path
-                d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"
-              ></path>
-            </svg>
+      <!-- Controls & Status -->
+      <div class="flex items-center gap-3">
+        <!-- Add Node input / toggle -->
+        <div class="hidden md:flex items-center gap-2 bg-slate-800/80 border border-slate-700/60 rounded-lg p-1">
+          <input id="customNodeUrl" type="text" placeholder="http://localhost:3003" class="bg-transparent text-xs text-slate-200 px-2.5 py-1 focus:outline-none w-44 font-mono placeholder:text-slate-500" />
+          <button id="btnAddNode" class="px-2.5 py-1 text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-100 rounded transition-colors">
+            + Añadir Nodo
           </button>
         </div>
-      </header>
 
-      <!-- METRICS OVERVIEW CARDS -->
-      <section class="metrics-grid">
-        <!-- Card 1: Servidores Conectados -->
-        <div class="metric-card glow-cyan">
-          <div class="metric-header">
-            <div class="metric-icon-box cyan">
-              <svg
-                viewBox="0 0 24 24"
-                width="22"
-                height="22"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-                <line x1="6" y1="6" x2="6.01" y2="6"></line>
-                <line x1="6" y1="18" x2="6.01" y2="18"></line>
-              </svg>
-            </div>
-            <span class="metric-tag tag-emerald" id="tag-active-rate"
-              >100% Salud</span
-            >
-          </div>
-          <div class="metric-body">
-            <div class="metric-value-wrap">
-              <span class="metric-value" id="val-active-servers">0</span>
-              <span class="metric-unit"
-                >/ <span id="val-total-servers">0</span> Registrados</span
-              >
-            </div>
-            <div class="metric-label">Servidores Conectados en Red</div>
-          </div>
-          <div class="metric-footer">
-            <div class="pulse-indicator">
-              <span class="dot live"></span>
-              <span id="servers-status-summary"
-                >Esperando conexiones de servidores...</span
-              >
-            </div>
-          </div>
+        <!-- Polling Indicator -->
+        <div class="flex items-center gap-2 bg-slate-800/60 border border-slate-700/50 px-3 py-1.5 rounded-lg">
+          <span class="relative flex h-2.5 w-2.5">
+            <span id="pollPulse" class="animate-ping-slow absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span class="text-xs font-medium text-slate-300">Sync: <span id="syncCountdown" class="text-emerald-400 font-mono">2s</span></span>
         </div>
 
-        <!-- Card 2: Mensajes Recibidos -->
-        <div class="metric-card glow-purple">
-          <div class="metric-header">
-            <div class="metric-icon-box purple">
-              <svg
-                viewBox="0 0 24 24"
-                width="22"
-                height="22"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                ></path>
-              </svg>
-            </div>
-            <span class="metric-tag tag-purple" id="tag-msg-rate"
-              >Tiempo Real</span
-            >
-          </div>
-          <div class="metric-body">
-            <div class="metric-value-wrap">
-              <span class="metric-value" id="val-total-messages">0</span>
-              <span class="metric-unit">mensajes</span>
-            </div>
-            <div class="metric-label">Mensajes Recibidos & Transmitidos</div>
-          </div>
-          <div class="metric-footer">
-            <div class="footer-info">
-              <svg
-                viewBox="0 0 24 24"
-                width="13"
-                height="13"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-              </svg>
-              <span id="last-message-time">Sin mensajes aún</span>
-            </div>
-          </div>
-        </div>
+        <button id="btnManualRefresh" title="Refrescar ahora" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition-colors">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+      </div>
 
-        <!-- Card 3: Monitoreo de Heartbeats -->
-        <div class="metric-card glow-emerald">
-          <div class="metric-header">
-            <div class="metric-icon-box emerald">
-              <svg
-                viewBox="0 0 24 24"
-                width="22"
-                height="22"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"
-                ></path>
-              </svg>
-            </div>
-            <span class="metric-tag tag-emerald">Timeout: 15s</span>
+    </div>
+  </header>
+
+  <!-- MAIN WRAPPER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1 w-full">
+
+    <!-- 1. HERO BANNER: SUPREME LEADER STATUS -->
+    <div id="heroLeaderBanner" class="glass-card-leader rounded-2xl p-5 md:p-6 transition-all duration-300 relative overflow-hidden">
+      <!-- Glow background inside banner -->
+      <div class="absolute -right-10 -bottom-10 w-60 h-60 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+
+      <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        
+        <div class="flex items-center gap-4">
+          <div class="h-14 w-14 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-3xl shadow-inner shadow-emerald-500/30 shrink-0">
+            👑
           </div>
-          <div class="metric-body">
-            <div class="metric-value-wrap">
-              <span class="metric-value" id="val-heartbeat-freq">5s</span>
-              <span class="metric-unit">frecuencia habitual</span>
-            </div>
-            <div class="metric-label">Pulsos de Vida (Heartbeats)</div>
-          </div>
-          <div class="metric-footer">
-            <div class="footer-info">
-              <span class="heartbeat-wave">
-                <span></span><span></span><span></span><span></span>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-emerald-400">Líder Supremo Activo</span>
+              <span id="bannerLeaderStatusBadge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
+                AUTORIDAD TOTAL
               </span>
-              <span id="heartbeat-summary">Detección automática activa</span>
+            </div>
+            <h2 id="bannerLeaderTitle" class="text-xl md:text-2xl font-black text-white tracking-tight mt-0.5">
+              Nodo <span id="bannerLeaderId" class="text-emerald-400">Detectando...</span>
+            </h2>
+            <div class="flex flex-wrap items-center gap-3 text-xs text-slate-300 mt-1 font-mono">
+              <span>Endpoint: <strong id="bannerLeaderUrl" class="text-emerald-300 font-mono">Consultando clúster...</strong></span>
+              <span class="text-slate-600">•</span>
+              <span>Protocolo: <span class="text-slate-400 font-sans font-medium">Bully Election</span></span>
             </div>
           </div>
         </div>
 
-        <!-- Card 4: Uptime & Middleware -->
-        <div class="metric-card glow-amber">
-          <div class="metric-header">
-            <div class="metric-icon-box amber">
-              <svg
-                viewBox="0 0 24 24"
-                width="22"
-                height="22"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <circle cx="12" cy="12" r="10"></circle>
-                <polyline points="12 6 12 12 16 14"></polyline>
+        <!-- Fast Stats in Hero -->
+        <div class="grid grid-cols-3 gap-2 sm:gap-3 w-full md:w-auto">
+          <div class="bg-surface-900/80 border border-slate-800 rounded-xl px-3.5 py-2 text-center">
+            <span class="block text-[10px] font-semibold uppercase text-slate-400">Coordinadores</span>
+            <span id="statCoordsAlive" class="text-lg font-bold text-emerald-400 font-mono">0 / 0</span>
+          </div>
+          <div class="bg-surface-900/80 border border-slate-800 rounded-xl px-3.5 py-2 text-center">
+            <span class="block text-[10px] font-semibold uppercase text-slate-400">Workers Vivos</span>
+            <span id="statWorkersCount" class="text-lg font-bold text-sky-400 font-mono">0</span>
+          </div>
+          <div class="bg-surface-900/80 border border-slate-800 rounded-xl px-3.5 py-2 text-center">
+            <span class="block text-[10px] font-semibold uppercase text-slate-400">Consenso</span>
+            <span id="statConsensusStatus" class="text-lg font-bold text-slate-200 font-mono text-xs mt-1">Estable</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 2. COORDINATOR TOPOLOGY PANEL (Cluster View) -->
+    <section class="space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+          </svg>
+          <h2 class="text-base font-bold text-white tracking-tight">Topología de Coordinadores</h2>
+          <span id="coordTotalBadge" class="text-xs font-mono bg-slate-800 text-slate-300 border border-slate-700 px-2 py-0.5 rounded-full">3 Nodos</span>
+        </div>
+        <span class="text-xs text-slate-400">Consulta periódica cada 2s vía <code class="text-emerald-400 font-mono">GET /election/state</code></span>
+      </div>
+
+      <!-- Coordinators Grid -->
+      <div id="coordinatorsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- Dynamic Coordinator Cards will be injected here -->
+        <div class="glass-card rounded-xl p-5 border border-slate-800 animate-pulse text-center text-slate-500 text-sm">
+          Descubriendo coordinadores del clúster...
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. TWO COLUMNS: WORKERS PANEL & SAFE MESSAGE DISPATCH -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+      <!-- LEFT COLUMN (7 cols): Workers / Servidores Registrados -->
+      <section class="lg:col-span-7 glass-card rounded-2xl p-5 space-y-4 border border-slate-800 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
               </svg>
+              <h2 class="text-base font-bold text-white tracking-tight">Workers / Servidores Registrados</h2>
             </div>
-            <span class="metric-tag tag-amber">Middleware :3000</span>
+            <span id="workersSourceBadge" class="text-xs font-mono text-slate-400 bg-slate-900 px-2.5 py-1 rounded-md border border-slate-800">
+              Vía Líder: <span class="text-emerald-400">Auto</span>
+            </span>
           </div>
-          <div class="metric-body">
-            <div class="metric-value-wrap">
-              <span class="metric-value" id="val-uptime">0s</span>
-            </div>
-            <div class="metric-label">Tiempo de Actividad (Uptime)</div>
+
+          <!-- Workers List / Table -->
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="text-slate-400 border-b border-slate-800/80 font-mono">
+                  <th class="pb-2 font-medium">Worker</th>
+                  <th class="pb-2 font-medium">URL & Puerto</th>
+                  <th class="pb-2 font-medium">Último Heartbeat</th>
+                  <th class="pb-2 font-medium">Estado</th>
+                  <th class="pb-2 text-right font-medium">Acción</th>
+                </tr>
+              </thead>
+              <tbody id="workersTableBody" class="divide-y divide-slate-800/40">
+                <!-- Dynamically populated -->
+                <tr>
+                  <td colspan="5" class="py-8 text-center text-slate-500">
+                    Buscando servidores registrados en el líder...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div class="metric-footer">
-            <div class="footer-info">
-              <span class="status-indicator-mini online"></span>
-              <span>http://localhost:3000</span>
-            </div>
-          </div>
+        </div>
+
+        <div class="text-[11px] text-slate-500 pt-2 border-t border-slate-800/60 flex items-center justify-between">
+          <span>Threshold timeout: <strong class="text-slate-400">15 seg</strong></span>
+          <span>Endpoint: <code class="text-slate-400 font-mono">GET /servers</code></span>
         </div>
       </section>
 
-      <!-- CLUSTER TOPOLOGY VISUALIZER (Interactive Canvas / Graph) -->
-      <section id="topology-section" class="panel topology-panel">
-        <div class="panel-header compact">
-          <div class="panel-title-wrap">
-            <div class="panel-icon-circle cyan">
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <circle cx="12" cy="12" r="3"></circle>
-                <path d="M12 2v3M12 19v3M2 12h3M19 12h3"></path>
+      <!-- RIGHT COLUMN (5 cols): Envío de Mensajes Seguro -->
+      <section class="lg:col-span-5 glass-card rounded-2xl p-5 space-y-4 border border-slate-800 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
               </svg>
+              <h2 class="text-base font-bold text-white tracking-tight">Envío de Mensajes Seguro</h2>
             </div>
+            <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              Anti-409 Auto Retry
+            </span>
+          </div>
+
+          <form id="msgForm" class="mt-4 space-y-3.5">
+            <!-- Worker Target Selector -->
             <div>
-              <h3 class="panel-title-sm">Topología de la Red Distribuida</h3>
-              <p class="panel-desc-sm">
-                Visualización interactiva de nodos conectados con intercambio de
-                mensajes en tiempo real
-              </p>
-            </div>
-          </div>
-          <div class="topology-legend">
-            <span class="legend-item"
-              ><span class="legend-dot hub"></span> Middleware</span
-            >
-            <span class="legend-item"
-              ><span class="legend-dot node"></span> Servidor Activo</span
-            >
-            <span class="legend-item"
-              ><span class="legend-dot packet"></span> Flujo de Datos</span
-            >
-          </div>
-        </div>
-        <div class="topology-canvas-wrap">
-          <canvas id="topology-canvas" width="1200" height="220"></canvas>
-        </div>
-      </section>
-
-      <!-- MAIN TWO-COLUMN DASHBOARD CONTENT -->
-      <main class="dashboard-grid">
-        <!-- LEFT SECTION: SERVERS CLUSTER PANEL -->
-        <section class="panel servers-panel">
-          <div class="panel-header">
-            <div class="panel-title-wrap">
-              <div class="panel-icon-circle cyan">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-                  <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-                  <line x1="6" y1="6" x2="6.01" y2="6"></line>
-                  <line x1="6" y1="18" x2="6.01" y2="18"></line>
-                </svg>
-              </div>
-              <div>
-                <h2 class="panel-title">Servidores Conectados</h2>
-                <p class="panel-desc">
-                  Nodos registrados que envían pulsos (heartbeat) y reciben
-                  mensajes
-                </p>
-              </div>
-            </div>
-
-            <div class="panel-actions">
-              <div class="search-box">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                </svg>
+              <label for="msgTarget" class="block text-xs font-semibold text-slate-300 mb-1">
+                Destinatario (Worker Name):
+              </label>
+              <div class="flex gap-2">
                 <input
+                  id="msgTarget"
                   type="text"
-                  id="filter-servers"
-                  placeholder="Buscar servidor..."
+                  required
+                  placeholder="ej. worker-1"
+                  class="flex-1 bg-surface-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 font-mono transition-colors"
                 />
-              </div>
-              <button
-                id="btn-refresh-servers"
-                class="icon-button"
-                title="Actualizar datos ahora"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <polyline points="23 4 23 10 17 10"></polyline>
-                  <polyline points="1 20 1 14 7 14"></polyline>
-                  <path
-                    d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
-                  ></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <!-- Server Cards Grid Container -->
-          <div class="panel-body">
-            <div id="servers-container" class="servers-grid">
-              <!-- Dynamic Server Cards will be injected here by JS -->
-            </div>
-
-            <!-- Empty State when no servers -->
-            <div id="servers-empty" class="empty-state hidden">
-              <div class="empty-icon-wrap cyan">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="40"
-                  height="40"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                >
-                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-                  <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-                  <line x1="6" y1="6" x2="6.01" y2="6"></line>
-                  <line x1="6" y1="18" x2="6.01" y2="18"></line>
-                </svg>
-              </div>
-              <h3>No hay servidores conectados</h3>
-              <p>Ejecuta en tu terminal:</p>
-              <div
-                class="quick-cmd-box"
-                data-copy="node miniServer.js 4000 ServerJuan"
-              >
-                <code>node miniServer.js 4000 ServerJuan</code>
-                <span class="cmd-copy-tag">Clic para copiar</span>
-              </div>
-              <p style="margin-top: 10px">
-                O conecta un nodo de prueba directamente con el botón:
-              </p>
-              <button id="btn-empty-simulate" class="btn btn-primary btn-sm">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="14"
-                  height="14"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                Conectar Servidor de Prueba
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- RIGHT SECTION: MESSAGES FEED & INTERACTIVE SENDER -->
-        <section class="panel messages-panel">
-          <div class="panel-header">
-            <div class="panel-title-wrap">
-              <div class="panel-icon-circle purple">
-                <svg
-                  viewBox="0 0 24 24"
-                  width="18"
-                  height="18"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                  ></path>
-                </svg>
-              </div>
-              <div>
-                <h2 class="panel-title">Mensajes de los Servidores</h2>
-                <p class="panel-desc">
-                  Bandeja en tiempo real de mensajes entrantes, directos y de
-                  difusión
-                </p>
-              </div>
-            </div>
-
-            <div class="panel-actions">
-              <!-- Filter Dropdown -->
-              <div class="custom-select-wrap">
-                <select
-                  id="select-msg-filter"
-                  class="form-select-sm"
-                  title="Filtrar por remitente"
-                >
-                  <option value="all">Todos los Remitentes</option>
-                  <!-- Dynamic options by server injected by JS -->
+                <select id="msgWorkerDropdown" class="bg-surface-900 border border-slate-700/80 rounded-lg px-2 py-2 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 transition-colors">
+                  <option value="">Seleccionar...</option>
                 </select>
               </div>
-              <button
-                id="btn-clear-messages"
-                class="icon-button danger"
-                title="Vaciar historial de mensajes"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path
-                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                  ></path>
-                </svg>
-              </button>
-            </div>
-          </div>
-
-          <!-- Message Filter Tabs / Chips -->
-          <div class="msg-tabs-bar">
-            <div class="msg-category-chips">
-              <button class="chip active" data-msg-type="all">
-                Todos (<span id="count-all-msgs">0</span>)
-              </button>
-              <button class="chip" data-msg-type="received">
-                De Servidores (<span id="count-node-msgs">0</span>)
-              </button>
-              <button class="chip" data-msg-type="outgoing">
-                Enviados / Directos
-              </button>
-              <button class="chip" data-msg-type="system">
-                Sistema & Eventos
-              </button>
             </div>
 
-            <div class="msg-search-box">
-              <svg
-                viewBox="0 0 24 24"
-                width="13"
-                height="13"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              <input
-                type="text"
-                id="filter-msg-text"
-                placeholder="Filtrar texto..."
-              />
-            </div>
-          </div>
-
-          <!-- Messages Feed Container -->
-          <div class="messages-container" id="messages-list">
-            <!-- Dynamic Message Bubbles will be injected here by JS -->
-          </div>
-
-          <!-- Empty State when no messages -->
-          <div id="messages-empty" class="empty-state hidden">
-            <div class="empty-icon-wrap purple">
-              <svg
-                viewBox="0 0 24 24"
-                width="36"
-                height="36"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <path
-                  d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-                ></path>
-              </svg>
-            </div>
-            <h3>Sin mensajes en el registro</h3>
-            <p>
-              Los mensajes enviados por <code>miniServer.js</code> o peticiones
-              HTTP se mostrarán aquí al instante.
-            </p>
-            <div class="empty-actions">
-              <button id="btn-quick-sim-msg" class="btn btn-secondary btn-sm">
-                Enviar Mensaje de Prueba
-              </button>
-            </div>
-          </div>
-
-          <!-- Interactive Send Message Box -->
-          <div class="message-composer">
-            <!-- Quick Templates Bar -->
-            <div class="templates-bar">
-              <span class="templates-label">Plantillas rápidas:</span>
-              <button
-                type="button"
-                class="btn-template"
-                data-tpl="Hola Middleware, el servidor está operando al 100%"
-              >
-                Saludo de Servidor
-              </button>
-              <button
-                type="button"
-                class="btn-template"
-                data-tpl="Procesando lote de datos #1024 - Estado OK"
-              >
-                Reporte de Lote
-              </button>
-              <button
-                type="button"
-                class="btn-template"
-                data-tpl="PING: Verificación de latencia y conectividad"
-              >
-                Ping Test
-              </button>
-              <button
-                type="button"
-                class="btn-template"
-                data-tpl="Alerta: Carga de CPU al 85% en nodo de cómputo"
-              >
-                Advertencia de Carga
-              </button>
-            </div>
-
-            <form id="form-send-message" class="composer-form">
-              <div class="composer-top-row">
-                <div class="field-inline">
-                  <label for="msg-sender-name">De (Remitente):</label>
-                  <input
-                    type="text"
-                    id="msg-sender-name"
-                    class="input-inline"
-                    value="Admin-Dashboard"
-                    placeholder="Tu nombre o nodo..."
-                  />
-                </div>
-                <div class="field-inline">
-                  <label for="msg-target-node">Para (Destino):</label>
-                  <select id="msg-target-node" class="select-inline">
-                    <option value="Middleware">
-                      Middleware (General /messages)
-                    </option>
-                    <!-- Dynamic server options -->
-                  </select>
-                </div>
-              </div>
-
-              <div class="composer-bottom-row">
-                <input
-                  type="text"
-                  id="msg-content-input"
-                  class="composer-input"
-                  placeholder="Escribe un mensaje para transmitir por la red..."
-                  required
-                  autocomplete="off"
-                />
-                <button type="submit" class="btn btn-primary btn-send">
-                  <span>Enviar</span>
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="16"
-                    height="16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <line x1="22" y1="2" x2="11" y2="13"></line>
-                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                  </svg>
-                </button>
-              </div>
-            </form>
-          </div>
-        </section>
-      </main>
-
-      <!-- FOOTER -->
-      <footer class="app-footer">
-        <div class="footer-left-info">
-          <span
-            >Sistemas Distribuidos •
-            <strong>Middleware Monitor v2.0</strong></span
-          >
-          <span class="sep">•</span>
-          <span
-            >Endpoints: <code>/register</code>, <code>/heartbeat/:name</code>,
-            <code>/send-message/:name</code>, <code>/messages</code></span
-          >
-        </div>
-        <div class="footer-status-pill">
-          <span class="pulse-dot active"></span>
-          <span>Sincronización en vivo: <strong>1.5s</strong></span>
-        </div>
-      </footer>
-    </div>
-
-    <!-- MODAL: GUÍA DE COMANDOS & INTEGRACIÓN -->
-    <div id="modal-guide" class="modal-backdrop hidden">
-      <div class="modal-card">
-        <div class="modal-header">
-          <div class="modal-title-box">
-            <svg
-              viewBox="0 0 24 24"
-              width="20"
-              height="20"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-              <path
-                d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
-              ></path>
-            </svg>
-            <h3>Guía de Integración & Comandos</h3>
-          </div>
-          <button class="modal-close" data-close-modal>&times;</button>
-        </div>
-
-        <div class="modal-body">
-          <p class="modal-intro">
-            Usa estos comandos en tu terminal de PowerShell o CMD para conectar
-            servidores y enviar mensajes al Middleware:
-          </p>
-
-          <div class="guide-section">
-            <div class="guide-section-header">
-              <span class="step-num">1</span>
-              <h4>Iniciar un miniServer local (Servidor nodo)</h4>
-            </div>
-            <p class="guide-desc">
-              Inicia un servidor en el puerto 4000 con el nombre 'ServerJuan' y
-              se conecta automáticamente al Middleware:
-            </p>
-            <div class="code-block">
-              <code>node miniServer.js 4000 ServerJuan</code>
-              <button
-                class="btn-copy"
-                data-copy="node miniServer.js 4000 ServerJuan"
-              >
-                Copiar
-              </button>
-            </div>
-          </div>
-
-          <div class="guide-section">
-            <div class="guide-section-header">
-              <span class="step-num">2</span>
-              <h4>Iniciar múltiples servidores simultáneos</h4>
-            </div>
-            <p class="guide-desc">
-              Abre otra terminal para correr otro nodo en paralelo:
-            </p>
-            <div class="code-block">
-              <code>node miniServer.js 4001 ServerMaria</code>
-              <button
-                class="btn-copy"
-                data-copy="node miniServer.js 4001 ServerMaria"
-              >
-                Copiar
-              </button>
-            </div>
-          </div>
-
-          <div class="guide-section">
-            <div class="guide-section-header">
-              <span class="step-num">3</span>
-              <h4>Enviar mensaje desde la terminal (`/messages`)</h4>
-            </div>
-            <div class="code-block">
-              <code
-                >curl -X POST http://localhost:3000/messages -H "Content-Type:
-                application/json" -d "{\"sender\": \"ServerJuan\", \"message\":
-                \"¡Hola desde mi servidor!\"}"</code
-              >
-              <button
-                class="btn-copy"
-                data-copy='curl -X POST http://localhost:3000/messages -H "Content-Type: application/json" -d "{\"sender\": \"ServerJuan\", \"message\": \"¡Hola desde mi servidor!\"}"'
-              >
-                Copiar
-              </button>
-            </div>
-          </div>
-
-          <div class="guide-section">
-            <div class="guide-section-header">
-              <span class="step-num">4</span>
-              <h4>Enviar mensaje dirigido (`/send-message/:name`)</h4>
-            </div>
-            <div class="code-block">
-              <code
-                >curl -X POST http://localhost:3000/send-message/ServerJuan -H
-                "Content-Type: application/json" -d "{\"sender\":
-                \"Cliente_01\", \"message\": \"Tarea distribuida
-                completada\"}"</code
-              >
-              <button
-                class="btn-copy"
-                data-copy='curl -X POST http://localhost:3000/send-message/ServerJuan -H "Content-Type: application/json" -d "{\"sender\": \"Cliente_01\", \"message\": \"Tarea distribuida completada\"}"'
-              >
-                Copiar
-              </button>
-            </div>
-          </div>
-
-          <div class="guide-section">
-            <div class="guide-section-header">
-              <span class="step-num">5</span>
-              <h4>Enviar Heartbeat manual</h4>
-            </div>
-            <div class="code-block">
-              <code
-                >curl -X POST http://localhost:3000/heartbeat/ServerJuan</code
-              >
-              <button
-                class="btn-copy"
-                data-copy="curl -X POST http://localhost:3000/heartbeat/ServerJuan"
-              >
-                Copiar
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button class="btn btn-primary" data-close-modal>Entendido</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- MODAL: CONECTAR / SIMULAR NODO -->
-    <div id="modal-simulate" class="modal-backdrop hidden">
-      <div class="modal-card">
-        <div class="modal-header">
-          <div class="modal-title-box">
-            <svg
-              viewBox="0 0 24 24"
-              width="20"
-              height="20"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <h3>Registrar Servidor en la Red</h3>
-          </div>
-          <button class="modal-close" data-close-modal>&times;</button>
-        </div>
-
-        <form id="form-simulate-node">
-          <div class="modal-body">
-            <div class="form-group">
-              <label for="sim-node-name">Nombre del Servidor</label>
-              <input
-                type="text"
-                id="sim-node-name"
-                class="form-control"
-                placeholder="ej. ServerJuan, Node-Alpha, ServerBogota"
-                required
-              />
-            </div>
-            <div class="form-group">
-              <label for="sim-node-url">URL / Puerto del Servidor</label>
-              <input
-                type="text"
-                id="sim-node-url"
-                class="form-control"
-                value="http://localhost:4000"
-                placeholder="http://localhost:4000"
-                required
-              />
-            </div>
-            <div class="form-group checkbox-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="sim-auto-heartbeat" checked />
-                <span
-                  >Enviar pulsos (heartbeat) automáticos cada 5 segundos para
-                  mantenerlo activo</span
-                >
+            <!-- Sender Name -->
+            <div>
+              <label for="msgSender" class="block text-xs font-semibold text-slate-300 mb-1">
+                Remitente:
               </label>
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-close-modal>
-              Cancelar
-            </button>
-            <button type="submit" class="btn btn-primary">
-              Registrar y Conectar
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- MODAL: SIMULAR MENSAJE ENTRANTE -->
-    <div id="modal-sim-message" class="modal-backdrop hidden">
-      <div class="modal-card">
-        <div class="modal-header">
-          <div class="modal-title-box">
-            <svg
-              viewBox="0 0 24 24"
-              width="20"
-              height="20"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
-              ></path>
-            </svg>
-            <h3>Simular Mensaje Entrante desde un Servidor</h3>
-          </div>
-          <button class="modal-close" data-close-modal>&times;</button>
-        </div>
-
-        <form id="form-modal-sim-msg">
-          <div class="modal-body">
-            <div class="form-group">
-              <label for="sim-msg-sender"
-                >Servidor / Remitente que envía el mensaje:</label
-              >
               <input
+                id="msgSender"
                 type="text"
-                id="sim-msg-sender"
-                class="form-control"
-                placeholder="ej. ServerJuan, Node-01"
-                value="ServerJuan"
-                required
+                value="Dashboard Admin"
+                class="w-full bg-surface-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
               />
             </div>
-            <div class="form-group">
-              <label for="sim-msg-route">Ruta / Endpoint:</label>
-              <select id="sim-msg-route" class="form-control">
-                <option value="messages">
-                  POST /messages (General al Middleware)
-                </option>
-                <option value="send-message">
-                  POST /send-message/:name (Dirigido a nodo)
-                </option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="sim-msg-text">Contenido del Mensaje:</label>
-              <textarea
-                id="sim-msg-text"
-                class="form-control"
-                rows="3"
-                placeholder="Escribe el mensaje que el servidor transmite..."
-                required
-              >
-¡Hola! Servidor reportando estado de conexión normal.</textarea
-              >
-            </div>
-          </div>
 
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-close-modal>
-              Cancelar
+            <!-- Message Body -->
+            <div>
+              <label for="msgBody" class="block text-xs font-semibold text-slate-300 mb-1">
+                Mensaje a despachar:
+              </label>
+              <textarea
+                id="msgBody"
+                rows="2"
+                required
+                placeholder="Escribe el mensaje para el worker..."
+                class="w-full bg-surface-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 transition-colors resize-none"
+              ></textarea>
+            </div>
+
+            <!-- Dispatch Button -->
+            <button
+              type="submit"
+              id="btnSubmitMsg"
+              class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold tracking-wide shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
+            >
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              </svg>
+              <span>Despachar Mensaje vía Líder</span>
             </button>
-            <button type="submit" class="btn btn-primary">
-              Transmitir Mensaje
-            </button>
-          </div>
-        </form>
-      </div>
+          </form>
+
+          <!-- Result Alert Feedback -->
+          <div id="msgFeedback" class="hidden mt-3 p-2.5 rounded-lg text-xs font-mono transition-all"></div>
+        </div>
+
+        <div class="text-[11px] text-slate-500 pt-2 border-t border-slate-800/60">
+          Envía a <code class="text-slate-400 font-mono">POST /send-message/:name</code>. Si responde <strong class="text-amber-400">409</strong>, reconecta al líder indicado en <code class="text-slate-400 font-mono">data.leader</code>.
+        </div>
+      </section>
+
     </div>
 
-    <!-- TOAST NOTIFICATIONS CONTAINER -->
-    <div id="toast-container" class="toast-container"></div>
+    <!-- 4. GLOBAL CLUSTER ACTIVITY LOG (Console View) -->
+    <section class="glass-card rounded-2xl p-5 border border-slate-800 space-y-3">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div class="flex items-center gap-2">
+          <div class="flex space-x-1.5 mr-2">
+            <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
+            <span class="w-3 h-3 rounded-full bg-yellow-500/80 inline-block"></span>
+            <span class="w-3 h-3 rounded-full bg-green-500/80 inline-block"></span>
+          </div>
+          <h2 class="text-sm font-bold text-white tracking-tight font-mono flex items-center gap-2">
+            <span>Consola de Eventos del Clúster</span>
+            <span class="text-xs text-slate-500 font-normal">[Real-Time Stream]</span>
+          </h2>
+        </div>
 
-    <!-- JS SCRIPT -->
-    <script src="app.js"></script>
-  </body>
+        <div class="flex items-center gap-2">
+          <button id="btnClearLogs" class="text-xs text-slate-400 hover:text-white bg-slate-800/60 hover:bg-slate-700 px-2.5 py-1 rounded border border-slate-700 transition-colors font-mono">
+            Limpiar
+          </button>
+          <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer select-none">
+            <input id="chkAutoScroll" type="checkbox" checked class="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+            <span>Auto-scroll</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Terminal Output Window -->
+      <div id="terminalLogs" class="h-56 overflow-y-auto bg-surface-950 p-3.5 rounded-xl font-mono text-xs text-slate-300 space-y-1.5 border border-slate-900 shadow-inner">
+        <!-- Log lines dynamically appended here -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-slate-800/80 py-4 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <span>Sistemas Distribuidos — Algoritmo de Elección Bully & Failover Automático</span>
+      <span class="font-mono text-slate-600">Juan Diego | Middleware Cluster Control</span>
+    </div>
+  </footer>
+
+  <!-- CORE DASHBOARD LOGIC (VANILLA JS) -->
+  <script>
+    (function () {
+      // ==========================================
+      // ESTADO GLOBAL DEL FRONTEND
+      // ==========================================
+      // Detectar host y protocolo actual (localhost, 127.0.0.1 o IP LAN)
+      const currentHost = (window.location && window.location.hostname && window.location.hostname !== "") 
+        ? window.location.hostname 
+        : "localhost";
+      const currentProto = (window.location && window.location.protocol && window.location.protocol.startsWith("http")) 
+        ? window.location.protocol 
+        : "http:";
+
+      // Semillas iniciales conocidas (soporta 4 o más coordinadores por defecto)
+      const DEFAULT_PORTS = [3000, 3001, 3002, 3003];
+      const DEFAULT_SEEDS = [
+        ...DEFAULT_PORTS.map(p => `${currentProto}//${currentHost}:${p}`),
+        ...DEFAULT_PORTS.map(p => `http://localhost:${p}`),
+        ...DEFAULT_PORTS.map(p => `http://127.0.0.1:${p}`)
+      ];
+
+      // Conjunto de URLs de coordinadores conocidos (sin duplicados)
+      const knownCoordinators = new Set(DEFAULT_SEEDS);
+      
+      // Si la URL desde donde se carga el index.html no está en la lista, agregarla
+      if (window.location.origin && window.location.origin.startsWith("http")) {
+        knownCoordinators.add(window.location.origin);
+      }
+
+      // Memoria de estado de cada coordinador: { [url]: { id, url, role, leader, leaderUrl, peers, isOnline, latency, lastChecked } }
+      const coordinatorStates = {};
+
+      // Referencia del líder supremo activo
+      let activeLeaderUrl = null;
+      let activeLeaderId = null;
+      let lastKnownLeaderUrl = null;
+
+      // Lista en caché de workers
+      let cachedWorkers = [];
+
+      // Intervalo de Polling (2000 ms)
+      const POLL_INTERVAL_MS = 2000;
+      let pollTimer = null;
+      let countdownSeconds = 2;
+
+      // ==========================================
+      // LOGGING VISUAL A LA CONSOLA
+      // ==========================================
+      const terminalLogs = document.getElementById("terminalLogs");
+      const chkAutoScroll = document.getElementById("chkAutoScroll");
+
+      function addLog(type, message) {
+        const timeStr = new Date().toLocaleTimeString();
+        let badgeColor = "bg-slate-800 text-slate-300 border-slate-700";
+        let textColor = "text-slate-300";
+
+        switch (type) {
+          case "LEADER":
+            badgeColor = "bg-emerald-950 text-emerald-300 border-emerald-700";
+            textColor = "text-emerald-200";
+            break;
+          case "FAILOVER":
+            badgeColor = "bg-purple-950 text-purple-300 border-purple-700";
+            textColor = "text-purple-200";
+            break;
+          case "ALERT":
+          case "DEAD":
+            badgeColor = "bg-rose-950 text-rose-300 border-rose-700";
+            textColor = "text-rose-200";
+            break;
+          case "MESSAGE":
+            badgeColor = "bg-sky-950 text-sky-300 border-sky-700";
+            textColor = "text-sky-200";
+            break;
+          case "409_REDIRECT":
+            badgeColor = "bg-amber-950 text-amber-300 border-amber-700";
+            textColor = "text-amber-200";
+            break;
+          case "DISCOVERY":
+            badgeColor = "bg-teal-950 text-teal-300 border-teal-700";
+            textColor = "text-teal-200";
+            break;
+          default:
+            badgeColor = "bg-slate-900 text-slate-400 border-slate-800";
+            textColor = "text-slate-300";
+        }
+
+        const logEntry = document.createElement("div");
+        logEntry.className = "flex items-start gap-2 py-0.5 border-b border-slate-900/50 hover:bg-slate-900/40 rounded px-1 transition-colors";
+        logEntry.innerHTML = `
+          <span class="text-slate-600 text-[10px] select-none shrink-0">${timeStr}</span>
+          <span class="px-1.5 py-0.2 rounded text-[10px] uppercase font-bold border ${badgeColor} shrink-0">${type}</span>
+          <span class="${textColor} break-all">${escapeHtml(message)}</span>
+        `;
+
+        terminalLogs.appendChild(logEntry);
+
+        // Limitar a los últimos 300 logs
+        while (terminalLogs.children.length > 300) {
+          terminalLogs.removeChild(terminalLogs.firstChild);
+        }
+
+        if (chkAutoScroll.checked) {
+          terminalLogs.scrollTop = terminalLogs.scrollHeight;
+        }
+      }
+
+      function escapeHtml(str) {
+        if (!str) return "";
+        return String(str)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      // ==========================================
+      // CONSULTA Y DESCUBRIMIENTO DEL CLÚSTER
+      // ==========================================
+
+      // Consultar un coordinador específico con timeout
+      async function pollCoordinator(url) {
+        const start = performance.now();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1600);
+
+        try {
+          const res = await fetch(`${url}/election/state`, {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
+          }
+
+          const data = await res.json();
+          const latency = Math.round(performance.now() - start);
+
+          // Aprender nuevos peers dinámicamente si los reporta
+          if (Array.isArray(data.peers)) {
+            data.peers.forEach(peerUrl => {
+              if (peerUrl && !knownCoordinators.has(peerUrl)) {
+                knownCoordinators.add(peerUrl);
+                addLog("DISCOVERY", `Nuevo coordinador descubierto en red: ${peerUrl}`);
+              }
+            });
+          }
+
+          // Si el nodo anterior estaba marcado como caído, registrar reincorporación
+          const previousState = coordinatorStates[url];
+          if (previousState && !previousState.isOnline) {
+            addLog("DISCOVERY", `Coordinador [${data.id || url}] ha vuelto a responder online`);
+          }
+
+          coordinatorStates[url] = {
+            id: data.id || "N/A",
+            url: data.url || url,
+            role: data.role || "follower",
+            leader: data.leader || null,
+            leaderUrl: data.leaderUrl || null,
+            peers: data.peers || [],
+            isOnline: true,
+            latency: latency,
+            lastChecked: Date.now()
+          };
+
+          return coordinatorStates[url];
+        } catch (err) {
+          clearTimeout(timeoutId);
+          const wasOnline = coordinatorStates[url]?.isOnline;
+          
+          coordinatorStates[url] = {
+            id: coordinatorStates[url]?.id || "?",
+            url: url,
+            role: "unknown",
+            leader: null,
+            leaderUrl: null,
+            peers: coordinatorStates[url]?.peers || [],
+            isOnline: false,
+            latency: null,
+            lastChecked: Date.now(),
+            error: err.message
+          };
+
+          if (wasOnline === true) {
+            addLog("DEAD", `Coordinador en ${url} dejó de responder (Timeout/Caído)`);
+          }
+
+          return coordinatorStates[url];
+        }
+      }
+
+      // Ciclo principal de sincronización del clúster
+      async function syncCluster() {
+        const urls = Array.from(knownCoordinators);
+        
+        // Consultar todos los coordinadores en paralelo
+        await Promise.all(urls.map(url => pollCoordinator(url)));
+
+        // Identificar quién es el líder activo
+        evaluateSupremeLeader();
+
+        // Renderizar componentes
+        renderTopology();
+        renderHeroBanner();
+
+        // Consultar workers en el clúster
+        fetchWorkersFromLeader(activeLeaderUrl);
+      }
+
+      // Determinar cuál es el líder vigente según los estados reportados
+      function evaluateSupremeLeader() {
+        let newLeaderUrl = null;
+        let newLeaderId = null;
+
+        // 1. Buscar primero entre los nodos vivos que afirman tener rol "leader"
+        for (const [url, state] of Object.entries(coordinatorStates)) {
+          if (state.isOnline && state.role === "leader") {
+            newLeaderUrl = url;
+            newLeaderId = state.id;
+            break;
+          }
+        }
+
+        // 2. Si ninguno tiene rol "leader" directamente, buscar a quién reconocen la mayoría de los seguidores vivos
+        if (!newLeaderUrl) {
+          for (const [url, state] of Object.entries(coordinatorStates)) {
+            if (state.isOnline && state.leaderUrl && coordinatorStates[state.leaderUrl]?.isOnline) {
+              newLeaderUrl = state.leaderUrl;
+              newLeaderId = state.leader;
+              break;
+            }
+          }
+        }
+
+        // Detectar cambio de líder para notificar en la consola de eventos
+        if (newLeaderUrl !== lastKnownLeaderUrl) {
+          if (newLeaderUrl) {
+            if (lastKnownLeaderUrl) {
+              addLog("FAILOVER", `¡CONMUTACIÓN DE LÍDER! Nuevo líder electo: Nodo ${newLeaderId} en ${newLeaderUrl}`);
+            } else {
+              addLog("LEADER", `Líder supremo inicial reconocido: Nodo ${newLeaderId} en ${newLeaderUrl}`);
+            }
+          } else if (lastKnownLeaderUrl) {
+            addLog("ALERT", `Líder anterior ${lastKnownLeaderUrl} cayó. Clúster en proceso de elección Bully...`);
+          }
+          lastKnownLeaderUrl = newLeaderUrl;
+        }
+
+        activeLeaderUrl = newLeaderUrl;
+        activeLeaderId = newLeaderId;
+      }
+
+      // ==========================================
+      // RENDERIZADO DE TOPOLOGÍA DE COORDINADORES
+      // ==========================================
+      const coordinatorsGrid = document.getElementById("coordinatorsGrid");
+      const coordTotalBadge = document.getElementById("coordTotalBadge");
+      const statCoordsAlive = document.getElementById("statCoordsAlive");
+      const statConsensusStatus = document.getElementById("statConsensusStatus");
+
+      function renderTopology() {
+        // Agrupar y deduplicar por puerto para no duplicar localhost vs 127.0.0.1
+        const portMap = new Map();
+        Array.from(knownCoordinators).forEach(url => {
+          let portKey = url;
+          try {
+            const parsed = new URL(url);
+            portKey = parsed.port || "80";
+          } catch(e) {}
+          
+          const current = portMap.get(portKey);
+          const state = coordinatorStates[url];
+          
+          if (!current) {
+            portMap.set(portKey, url);
+          } else if (state && state.isOnline) {
+            // Preferir la URL que responda online
+            portMap.set(portKey, url);
+          }
+        });
+
+        const distinctUrls = Array.from(portMap.values()).sort();
+        const total = distinctUrls.length;
+        let aliveCount = 0;
+
+        coordinatorsGrid.innerHTML = "";
+
+        distinctUrls.forEach(url => {
+          const state = coordinatorStates[url] || { url, isOnline: false, role: "unknown", id: "?" };
+          if (state.isOnline) aliveCount++;
+
+          const isLeader = state.isOnline && state.role === "leader";
+          const isFollower = state.isOnline && state.role !== "leader";
+          const isOffline = !state.isOnline;
+
+          // Construir tarjeta
+          const card = document.createElement("div");
+          
+          if (isLeader) {
+            card.className = "glass-card-leader rounded-xl p-4.5 border transition-all duration-300 relative overflow-hidden flex flex-col justify-between";
+          } else if (isOffline) {
+            card.className = "glass-card-offline rounded-xl p-4.5 border transition-all duration-300 flex flex-col justify-between opacity-80 hover:opacity-100";
+          } else {
+            card.className = "glass-card rounded-xl p-4.5 border border-slate-800 transition-all duration-300 flex flex-col justify-between";
+          }
+
+          // Badge de Rol
+          let roleBadgeHtml = "";
+          if (isLeader) {
+            roleBadgeHtml = `
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                LÍDER
+              </span>
+            `;
+          } else if (isFollower) {
+            roleBadgeHtml = `
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                SEGUIDOR
+              </span>
+            `;
+          } else {
+            roleBadgeHtml = `
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                CAÍDO / OFFLINE
+              </span>
+            `;
+          }
+
+          // Peers tags
+          const peersList = state.peers && state.peers.length > 0 
+            ? state.peers.map(p => `<span class="bg-slate-800/80 px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-300 border border-slate-700/60">${escapeHtml(p)}</span>`).join(" ")
+            : `<span class="text-slate-500 text-[11px] italic">Ninguno</span>`;
+
+          const leaderRecognizedText = state.leader 
+            ? `<strong class="text-emerald-300 font-mono">${escapeHtml(state.leader)}</strong> ${state.leaderUrl ? `(${escapeHtml(state.leaderUrl)})` : ''}`
+            : `<span class="text-slate-500">No definido</span>`;
+
+          // Extraer puerto
+          let portDisplay = "";
+          try {
+            const parsed = new URL(url);
+            portDisplay = `:${parsed.port || '80'}`;
+          } catch(e) {
+            portDisplay = url;
+          }
+
+          card.innerHTML = `
+            <div>
+              <!-- Header Tarjeta -->
+              <div class="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-800/60">
+                <div class="flex items-center gap-2">
+                  <div class="h-8 w-8 rounded-lg ${isLeader ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-300 border border-slate-700'} flex items-center justify-center font-bold text-sm font-mono">
+                    ${escapeHtml(state.id || '?')}
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-white font-mono leading-none">
+                      [${escapeHtml(state.id || '?')}${portDisplay}]
+                    </h3>
+                    <span class="text-[11px] text-slate-400 font-mono">${escapeHtml(url)}</span>
+                  </div>
+                </div>
+                ${roleBadgeHtml}
+              </div>
+
+              <!-- Info Body -->
+              <div class="py-3 space-y-2 text-xs">
+                <div class="flex items-start justify-between gap-1">
+                  <span class="text-slate-400">Líder reconocido:</span>
+                  <div class="text-right text-[11px]">${leaderRecognizedText}</div>
+                </div>
+
+                <div class="space-y-1">
+                  <span class="text-slate-400 block text-[11px]">Peers conocidos (${state.peers ? state.peers.length : 0}):</span>
+                  <div class="flex flex-wrap gap-1 max-h-16 overflow-y-auto pt-0.5">
+                    ${peersList}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Footer con Latencia y Acciones -->
+            <div class="pt-2.5 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+              <div class="flex items-center gap-1.5 font-mono text-slate-400">
+                ${state.isOnline ? `
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                  <span>⚡ ${state.latency}ms</span>
+                ` : `
+                  <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  <span class="text-rose-400">Sin respuesta</span>
+                `}
+              </div>
+
+              <div class="flex items-center gap-1">
+                ${state.isOnline ? `
+                  <button onclick="window.killCoordinator('${url}', '${state.id}')" title="Simular caída del nodo (POST /kill)" class="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 transition-colors">
+                    Matar /kill
+                  </button>
+                ` : `
+                  <button onclick="window.checkSingleNode('${url}')" class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors">
+                    Reintentar
+                  </button>
+                `}
+              </div>
+            </div>
+          `;
+
+          coordinatorsGrid.appendChild(card);
+        });
+
+        // Actualizar badges
+        coordTotalBadge.textContent = `${urls.length} Nodos`;
+        statCoordsAlive.textContent = `${aliveCount} / ${urls.length}`;
+        
+        if (aliveCount === 0) {
+          statConsensusStatus.textContent = "Sin Nodos";
+          statConsensusStatus.className = "text-lg font-bold text-rose-400 font-mono text-xs mt-1";
+        } else if (!activeLeaderUrl) {
+          statConsensusStatus.textContent = "Eligiendo...";
+          statConsensusStatus.className = "text-lg font-bold text-amber-400 font-mono text-xs mt-1";
+        } else {
+          statConsensusStatus.textContent = "Estable";
+          statConsensusStatus.className = "text-lg font-bold text-emerald-400 font-mono text-xs mt-1";
+        }
+      }
+
+      // Render Hero Banner
+      const bannerLeaderId = document.getElementById("bannerLeaderId");
+      const bannerLeaderUrl = document.getElementById("bannerLeaderUrl");
+      const heroLeaderBanner = document.getElementById("heroLeaderBanner");
+      const workersSourceBadge = document.getElementById("workersSourceBadge");
+
+      function renderHeroBanner() {
+        if (activeLeaderUrl) {
+          bannerLeaderId.textContent = activeLeaderId ? activeLeaderId : "Líder Identificado";
+          bannerLeaderUrl.textContent = activeLeaderUrl;
+          heroLeaderBanner.className = "glass-card-leader rounded-2xl p-5 md:p-6 transition-all duration-300 relative overflow-hidden";
+          workersSourceBadge.innerHTML = `Vía Líder: <span class="text-emerald-400 font-mono">${escapeHtml(activeLeaderUrl)}</span>`;
+        } else {
+          bannerLeaderId.textContent = "Elección en curso / Sin Líder";
+          bannerLeaderUrl.textContent = "Ningún coordinador responde con rol de líder";
+          heroLeaderBanner.className = "glass-card-offline rounded-2xl p-5 md:p-6 transition-all duration-300 relative overflow-hidden";
+          workersSourceBadge.innerHTML = `<span class="text-rose-400">Sin líder activo</span>`;
+        }
+      }
+
+      // ==========================================
+      // CONSULTA Y RENDERIZADO DE WORKERS
+      // ==========================================
+      const workersTableBody = document.getElementById("workersTableBody");
+      const statWorkersCount = document.getElementById("statWorkersCount");
+      const msgWorkerDropdown = document.getElementById("msgWorkerDropdown");
+      const msgTarget = document.getElementById("msgTarget");
+
+      async function fetchWorkersFromLeader(leaderUrl) {
+        const workersMap = new Map();
+        const urlsToQuery = [];
+
+        if (leaderUrl) {
+          urlsToQuery.push(leaderUrl);
+        }
+
+        // Agregar los demás coordinadores online para asegurar que no se pierda ningún worker
+        for (const [url, state] of Object.entries(coordinatorStates)) {
+          if (state.isOnline && !urlsToQuery.includes(url)) {
+            urlsToQuery.push(url);
+          }
+        }
+
+        if (urlsToQuery.length === 0) {
+          renderWorkers([]);
+          return;
+        }
+
+        await Promise.all(urlsToQuery.map(async (url) => {
+          try {
+            const res = await fetch(`${url}/servers`, {
+              headers: { "Accept": "application/json" }
+            });
+
+            if (res.ok) {
+              const list = await res.json();
+              if (Array.isArray(list)) {
+                list.forEach(w => {
+                  if (w && w.name) {
+                    const existing = workersMap.get(w.name);
+                    const isNewer = !existing || ((w.lastHeartbeat || 0) >= (existing.lastHeartbeat || 0));
+                    if (isNewer) {
+                      workersMap.set(w.name, { ...w, coordSource: url });
+                    }
+                  }
+                });
+              }
+            }
+          } catch (err) {
+            // Error silencioso en endpoint individual
+          }
+        }));
+
+        cachedWorkers = Array.from(workersMap.values());
+        renderWorkers(cachedWorkers);
+      }
+
+      function renderWorkers(workers) {
+        const count = Array.isArray(workers) ? workers.length : 0;
+        statWorkersCount.textContent = count;
+
+        // Actualizar opciones del select del formulario
+        const prevSelected = msgWorkerDropdown.value;
+        msgWorkerDropdown.innerHTML = '<option value="">Seleccionar de lista...</option>';
+        if (Array.isArray(workers)) {
+          workers.forEach(w => {
+            const opt = document.createElement("option");
+            opt.value = w.name;
+            opt.textContent = `${w.name} (${w.url || 'localhost'})`;
+            msgWorkerDropdown.appendChild(opt);
+          });
+        }
+        if (prevSelected) msgWorkerDropdown.value = prevSelected;
+
+        if (!workers || workers.length === 0) {
+          workersTableBody.innerHTML = `
+            <tr>
+              <td colspan="5" class="py-8 text-center text-slate-500">
+                <div class="max-w-sm mx-auto space-y-1">
+                  <p class="font-medium text-slate-400">No hay workers registrados actualmente</p>
+                  <p class="text-[11px] text-slate-600 font-mono">Ejecuta: node miniServer.js 4000 worker-1 http://localhost:3000</p>
+                </div>
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        workersTableBody.innerHTML = "";
+
+        workers.forEach(w => {
+          const isOnline = w.isOnline !== undefined ? w.isOnline : (w.elapsedSeconds !== undefined ? w.elapsedSeconds <= 15 : true);
+          const elapsed = w.elapsedSeconds !== undefined ? w.elapsedSeconds : (w.lastHeartbeat ? Math.floor((Date.now() - w.lastHeartbeat) / 1000) : 0);
+
+          const tr = document.createElement("tr");
+          tr.className = "hover:bg-slate-800/30 transition-colors";
+
+          tr.innerHTML = `
+            <td class="py-2.5 font-mono font-bold text-white flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}"></span>
+              <span>${escapeHtml(w.name)}</span>
+            </td>
+            <td class="py-2.5 font-mono text-slate-300">
+              ${escapeHtml(w.url || 'N/A')}
+            </td>
+            <td class="py-2.5 text-slate-400 font-mono">
+              hace ${elapsed}s
+              <span class="text-[10px] text-slate-600 block">(${w.heartbeatCount || 1} pulsos)</span>
+            </td>
+            <td class="py-2.5">
+              ${isOnline ? `
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  Online
+                </span>
+              ` : `
+                <span class="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                  Offline
+                </span>
+              `}
+            </td>
+            <td class="py-2.5 text-right">
+              <button onclick="window.selectWorkerForMessage('${escapeHtml(w.name)}')" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white border border-slate-700 hover:border-emerald-500 font-medium transition-colors text-[11px]">
+                Mensaje
+              </button>
+            </td>
+          `;
+
+          workersTableBody.appendChild(tr);
+        });
+      }
+
+      // ==========================================
+      // ENVÍO DE MENSAJES SEGURO (CON MANEJO 409)
+      // ==========================================
+      const msgForm = document.getElementById("msgForm");
+      const msgSender = document.getElementById("msgSender");
+      const msgBody = document.getElementById("msgBody");
+      const msgFeedback = document.getElementById("msgFeedback");
+      const btnSubmitMsg = document.getElementById("btnSubmitMsg");
+
+      msgWorkerDropdown.addEventListener("change", (e) => {
+        if (e.target.value) {
+          msgTarget.value = e.target.value;
+        }
+      });
+
+      window.selectWorkerForMessage = function (workerName) {
+        msgTarget.value = workerName;
+        msgBody.focus();
+        msgForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+
+      msgForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        const target = msgTarget.value.trim();
+        const sender = msgSender.value.trim() || "Dashboard Admin";
+        const message = msgBody.value.trim();
+
+        if (!target || !message) {
+          showFeedback("Por favor completa el destinatario y el mensaje", "error");
+          return;
+        }
+
+        // Si no hay líder conocido, intentar con cualquier nodo vivo disponible
+        let targetLeader = activeLeaderUrl;
+        if (!targetLeader) {
+          const firstAlive = Object.values(coordinatorStates).find(s => s.isOnline);
+          if (firstAlive) {
+            targetLeader = firstAlive.url;
+          } else {
+            showFeedback("Error: No hay ningún coordinador disponible en el clúster", "error");
+            addLog("ALERT", "Fallo al enviar mensaje: Clúster desconectado");
+            return;
+          }
+        }
+
+        btnSubmitMsg.disabled = true;
+        btnSubmitMsg.innerHTML = `
+          <svg class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span>Despachando...</span>
+        `;
+
+        await dispatchMessageWithRetry(targetLeader, target, message, sender, 0);
+
+        btnSubmitMsg.disabled = false;
+        btnSubmitMsg.innerHTML = `
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+          </svg>
+          <span>Despachar Mensaje vía Líder</span>
+        `;
+      });
+
+      async function dispatchMessageWithRetry(coordinatorUrl, targetWorker, message, sender, retryCount) {
+        if (retryCount > 3) {
+          showFeedback(`Error: Límite de reintentos excedido al contactar al líder`, "error");
+          addLog("ALERT", `Fallo persistente de despacho de mensaje a [${targetWorker}]`);
+          return;
+        }
+
+        try {
+          addLog("MESSAGE", `Despachando mensaje hacia [${targetWorker}] a través de ${coordinatorUrl}...`);
+
+          const res = await fetch(`${coordinatorUrl}/send-message/${encodeURIComponent(targetWorker)}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
+            body: JSON.stringify({ message, sender })
+          });
+
+          // CASO 409 CONFLICT: Redirección automática de líder
+          if (res.status === 409) {
+            const errData = await res.json();
+            const realLeader = errData.leader;
+
+            addLog("409_REDIRECT", `409 Conflict en ${coordinatorUrl}. Redirigiendo automáticamente al nuevo líder: ${realLeader}`);
+            
+            if (realLeader) {
+              activeLeaderUrl = realLeader;
+              renderHeroBanner();
+              // Reintento automático
+              return await dispatchMessageWithRetry(realLeader, targetWorker, message, sender, retryCount + 1);
+            }
+          }
+
+          if (!res.ok) {
+            const errJson = await res.json().catch(() => ({}));
+            throw new Error(errJson.error || `HTTP ${res.status}`);
+          }
+
+          const result = await res.json();
+          showFeedback(`✓ Mensaje despachado exitosamente a [${targetWorker}] vía ${coordinatorUrl}`, "success");
+          addLog("MESSAGE", `✓ Mensaje entregado a [${targetWorker}] vía líder ${coordinatorUrl}: "${message.substring(0, 30)}${message.length > 30 ? '...' : ''}"`);
+          msgBody.value = "";
+        } catch (err) {
+          showFeedback(`Error al enviar mensaje: ${err.message}`, "error");
+          addLog("ALERT", `Error enviando mensaje a [${targetWorker}] en ${coordinatorUrl}: ${err.message}`);
+        }
+      }
+
+      function showFeedback(text, type) {
+        msgFeedback.classList.remove("hidden", "bg-emerald-950", "text-emerald-300", "border-emerald-800", "bg-rose-950", "text-rose-300", "border-rose-800");
+        
+        if (type === "success") {
+          msgFeedback.className = "mt-3 p-2.5 rounded-lg text-xs font-mono border bg-emerald-950 text-emerald-300 border-emerald-800/80";
+        } else {
+          msgFeedback.className = "mt-3 p-2.5 rounded-lg text-xs font-mono border bg-rose-950 text-rose-300 border-rose-800/80";
+        }
+
+        msgFeedback.textContent = text;
+        msgFeedback.classList.remove("hidden");
+
+        setTimeout(() => {
+          msgFeedback.classList.add("hidden");
+        }, 5000);
+      }
+
+      // ==========================================
+      // ACCIONES GLOBALES Y CONTROLES
+      // ==========================================
+
+      // Matar coordinador vía POST /kill
+      window.killCoordinator = async function (url, nodeId) {
+        if (!confirm(`¿Seguro que deseas apagar/matar el Coordinador [${nodeId}] en ${url}?`)) {
+          return;
+        }
+
+        try {
+          addLog("ALERT", `Enviando solicitud de terminación /kill a Coordinador [${nodeId}:${url}]...`);
+          await fetch(`${url}/kill`, { method: "POST" });
+          addLog("DEAD", `Coordinador [${nodeId}] ha sido apagado.`);
+        } catch (e) {
+          // Es normal que falle si el proceso muere de inmediato
+          addLog("DEAD", `Coordinador [${nodeId}] apagado (conexión cerrada).`);
+        }
+
+        setTimeout(syncCluster, 500);
+      };
+
+      // Chequear un solo nodo
+      window.checkSingleNode = async function (url) {
+        addLog("DISCOVERY", `Re-verificando estado de ${url}...`);
+        await pollCoordinator(url);
+        evaluateSupremeLeader();
+        renderTopology();
+        renderHeroBanner();
+      };
+
+      // Agregar nuevo nodo a la lista
+      document.getElementById("btnAddNode").addEventListener("click", () => {
+        const input = document.getElementById("customNodeUrl");
+        let val = input.value.trim();
+        if (!val) return;
+
+        if (!val.startsWith("http://") && !val.startsWith("https://")) {
+          val = "http://" + val;
+        }
+
+        knownCoordinators.add(val);
+        addLog("DISCOVERY", `Añadido nuevo nodo de seguimiento: ${val}`);
+        input.value = "";
+        syncCluster();
+      });
+
+      // Refresco manual
+      document.getElementById("btnManualRefresh").addEventListener("click", () => {
+        countdownSeconds = 2;
+        syncCluster();
+      });
+
+      // Limpiar consola
+      document.getElementById("btnClearLogs").addEventListener("click", () => {
+        terminalLogs.innerHTML = "";
+        addLog("SYSTEM", "Consola de eventos limpiada");
+      });
+
+      // Temporizador de sincronización periódica
+      const syncCountdown = document.getElementById("syncCountdown");
+
+      function startPollingLoop() {
+        syncCluster();
+
+        setInterval(() => {
+          countdownSeconds--;
+          if (countdownSeconds <= 0) {
+            countdownSeconds = 2;
+            syncCluster();
+          }
+          if (syncCountdown) {
+            syncCountdown.textContent = `${countdownSeconds}s`;
+          }
+        }, 1000);
+      }
+
+      // Mensaje de arranque
+      addLog("SYSTEM", "Centro de Control Unificado del Clúster inicializado.");
+      addLog("DISCOVERY", `Nodos semilla iniciales: ${Array.from(knownCoordinators).join(", ")}`);
+
+      // Arrancar loop de sincronización
+      startPollingLoop();
+
+    })();
+  </script>
+</body>
 </html>
