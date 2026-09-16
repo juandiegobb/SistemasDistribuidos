@@ -1,6 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 const express = require("express");
+const axios = require("axios");
 
 const app = express();
 
@@ -8,7 +9,27 @@ app.use(express.json());
 // Servir archivos estáticos del dashboard visual
 app.use(express.static(path.join(__dirname, "public")));
 
-const PORT = 3000;
+// Identidad y Estado de Coordinador
+const NODE_ID = process.argv[2] || "A";
+const PORT = Number(process.argv[3]) || 3000;
+const SEED_URL = process.argv[4] || null;
+const MY_URL = `http://localhost:${PORT}`;
+
+// Variables de estado del nodo
+let role = "follower"; // "leader" | "candidate" | "follower"
+let currentLeader = null;
+let electionInProgress = false;
+let peers = {};
+
+// Si se proporcionó SEED_URL y es distinta a MY_URL, agregarla a la lista de peers inicial
+if (SEED_URL && SEED_URL !== MY_URL) {
+  peers[SEED_URL] = {
+    id: null,
+    url: SEED_URL,
+    lastSeen: Date.now(),
+  };
+}
+
 const startTime = Date.now();
 
 // Almacenamiento en memoria
@@ -325,6 +346,129 @@ app.post("/api/send-custom", (req, res) => {
   res.json({ status: "success", data: recorded });
 });
 
+// ==========================================================================
+// PROTOCOLO DE DESCUBRIMIENTO DE COORDINADORES Y ELECCIÓN
+// ==========================================================================
+
+// Endpoint POST /election/ping -> Recepción de ping de descubrimiento entre coordinadores
+app.post("/election/ping", (req, res) => {
+  const { from, peers: incomingPeers } = req.body;
+
+  if (!from || !from.url) {
+    return res.status(400).json({ error: "Payload inválido: se requiere 'from.url'" });
+  }
+
+  const senderUrl = from.url;
+  const senderId = from.id || "Desconocido";
+
+  // Actualizar o registrar el peer emisor si es distinto al nodo local
+  if (senderUrl !== MY_URL) {
+    const isNew = !peers[senderUrl];
+    peers[senderUrl] = {
+      id: senderId,
+      url: senderUrl,
+      lastSeen: Date.now(),
+    };
+
+    if (isNew) {
+      console.log(`[COORDINADOR] Nuevo peer descubierto: ${senderId} (${senderUrl})`);
+      recordMessage({
+        sender: senderId,
+        message: `Nuevo coordinador detectado en la red [${senderUrl}]`,
+        target: NODE_ID,
+        type: "system_event",
+      });
+    }
+  }
+
+  // Descubrir nuevos peers propagados en la lista (gossip / chisme)
+  if (Array.isArray(incomingPeers)) {
+    incomingPeers.forEach((peerUrl) => {
+      if (peerUrl && peerUrl !== MY_URL && !peers[peerUrl]) {
+        peers[peerUrl] = {
+          id: null,
+          url: peerUrl,
+          lastSeen: Date.now(),
+        };
+        console.log(`[COORDINADOR] Peer aprendido por propagación: ${peerUrl}`);
+      }
+    });
+  }
+
+  // Responder con acuse de recibo, identidad, rol y lista de peers conocidos
+  res.json({
+    ok: true,
+    from: { id: NODE_ID, url: MY_URL },
+    role,
+    currentLeader,
+    peers: Object.keys(peers),
+  });
+});
+
+// GET /election/status -> Consultar estado actual del coordinador y sus peers
+app.get("/election/status", (req, res) => {
+  const now = Date.now();
+  res.json({
+    nodeId: NODE_ID,
+    url: MY_URL,
+    role,
+    currentLeader,
+    electionInProgress,
+    peers: Object.values(peers).map((p) => ({
+      ...p,
+      elapsedSeconds: Math.floor((now - p.lastSeen) / 1000),
+      isOnline: now - p.lastSeen <= 15000,
+    })),
+  });
+});
+
+// Rutina periódica de intercambio de pings entre coordinadores
+const PING_INTERVAL_MS = 3000;
+
+async function sendPeerPings() {
+  const peerUrls = Object.keys(peers);
+  if (peerUrls.length === 0) return;
+
+  const payload = {
+    from: { id: NODE_ID, url: MY_URL },
+    peers: peerUrls,
+  };
+
+  for (const peerUrl of peerUrls) {
+    try {
+      const response = await axios.post(`${peerUrl}/election/ping`, payload, {
+        timeout: 2000,
+      });
+
+      if (peers[peerUrl]) {
+        peers[peerUrl].lastSeen = Date.now();
+        if (response.data?.from?.id) {
+          peers[peerUrl].id = response.data.from.id;
+        }
+      }
+
+      // Incorporar nuevos pares reportados en la respuesta
+      if (Array.isArray(response.data?.peers)) {
+        response.data.peers.forEach((discoveredUrl) => {
+          if (discoveredUrl && discoveredUrl !== MY_URL && !peers[discoveredUrl]) {
+            peers[discoveredUrl] = {
+              id: null,
+              url: discoveredUrl,
+              lastSeen: Date.now(),
+            };
+            console.log(`[COORDINADOR] Nuevo peer descubierto vía respuesta de ${peerUrl}: ${discoveredUrl}`);
+          }
+        });
+      }
+    } catch (err) {
+      // Peer temporalmente inalcanzable; no interrumpir el flujo
+    }
+  }
+}
+
+// Iniciar rutina periódica de pings
+const peerPingInterval = setInterval(sendPeerPings, PING_INTERVAL_MS);
+
 // Timeout check periódico de servidores
 setInterval(() => {
   const now = Date.now();
@@ -358,4 +502,8 @@ setInterval(() => {
 app.listen(PORT, () => {
   console.log(`Middleware corriendo en http://localhost:${PORT}`);
   console.log(`Dashboard visual disponible en http://localhost:${PORT}`);
+  console.log(`[COORDINADOR] Nodo ID: ${NODE_ID} | URL: ${MY_URL} | Rol: ${role}`);
+  if (SEED_URL) {
+    console.log(`[COORDINADOR] Conectado a semilla inicial: ${SEED_URL}`);
+  }
 });
