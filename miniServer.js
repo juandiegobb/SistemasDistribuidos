@@ -9,7 +9,7 @@ app.use(express.json());
 const PORT = process.argv[2];
 const NAME = process.argv[3];
 
-let MIDDLEWARE_URL = "http://localhost:3000";
+let MIDDLEWARE_URL = "http://localhost:3004";
 let pulseInterval;
 
 // ROOT

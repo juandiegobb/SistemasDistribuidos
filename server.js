@@ -58,6 +58,43 @@ if (SEED_URL && SEED_URL !== MY_URL) {
   }
 }
 
+// Obtener la dirección URL del líder actual
+function getLeaderUrl() {
+  if (!currentLeader) return null;
+  if (currentLeader === NODE_ID) return MY_URL;
+  const peer = Object.values(peers).find((p) => p.id === currentLeader);
+  if (peer && peer.url) return peer.url;
+  const preset = PRESET_LAN_NODES.find((p) => p.id === currentLeader);
+  if (preset) return preset.url;
+  return null;
+}
+
+// Middleware de Validación de Liderazgo (Fase 4: Que solo mande el líder)
+function onlyLeader(req, res, next) {
+  // 1. Si este nodo ES el líder
+  if (role === "leader" || currentLeader === NODE_ID) {
+    return next();
+  }
+
+  const currentLeaderUrl = getLeaderUrl();
+
+  // 2. Si este nodo NO es el líder, pero conoce quién es
+  if (currentLeader !== null && currentLeaderUrl) {
+    return res.status(409).json({
+      error: "Not the leader",
+      leader: currentLeaderUrl,
+      peers: Object.keys(peers),
+    });
+  }
+
+  // 3. Si NO hay líder definido todavía (o hay una elección activa)
+  return res.status(503).json({
+    error: "Election in progress",
+    retry: true,
+    peers: Object.keys(peers),
+  });
+}
+
 const startTime = Date.now();
 
 // Almacenamiento en memoria
@@ -100,8 +137,8 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Registrar servidor
-app.post("/register", (req, res) => {
+// Registrar servidor (Solo líder)
+app.post("/register", onlyLeader, (req, res) => {
   const { name, url } = req.body;
 
   if (!name || !url) {
@@ -142,8 +179,8 @@ app.post("/register", (req, res) => {
   });
 });
 
-// HeartBeat
-app.post("/heartbeat/:name", (req, res) => {
+// HeartBeat / Pulso (Solo líder)
+const handleHeartbeat = (req, res) => {
   const { name } = req.params;
 
   if (servers[name]) {
@@ -159,14 +196,19 @@ app.post("/heartbeat/:name", (req, res) => {
     if (heartbeatHistory.length > 100) heartbeatHistory.pop();
 
     return res.json({
-      message: "Hearbeat received",
+      message: "Pulse received",
+      leader: MY_URL,
+      peers: Object.keys(peers),
       server: name,
       timestamp: Date.now(),
     });
   }
 
   res.status(400).json({ error: "Server not found" });
-});
+};
+
+app.post("/heartbeat/:name", onlyLeader, handleHeartbeat);
+app.post("/pulse/:name", onlyLeader, handleHeartbeat);
 
 // Actualizar dinámicamente la URL registrada de un hijo
 app.put("/servers/:name/url", (req, res) => {
@@ -254,8 +296,8 @@ app.post("/messages", (req, res) => {
   res.json({ status: "success", info: "Mensaje recibido", data: recorded });
 });
 
-// POST /send-message/:name -> Recibir/Guardar mensaje para un servidor específico
-app.post("/send-message/:name", (req, res) => {
+// POST /send-message/:name -> Recibir/Guardar mensaje para un servidor específico (Solo líder)
+app.post("/send-message/:name", onlyLeader, (req, res) => {
   const { name } = req.params;
   const { message, sender } = req.body;
 
@@ -558,7 +600,73 @@ app.post("/election/elect", (req, res) => {
   }
 });
 
-// Endpoint POST /election/coordinator -> Anuncio de nuevo líder
+// Helper para enviar mensajes de elección asíncronos vía POST /election/message
+async function sendElectionMessage(targetUrl, messageObj) {
+  try {
+    await axios.post(`${targetUrl}/election/message`, messageObj, { timeout: 1500 });
+  } catch (err) {
+    // Fallback de compatibilidad con endpoints dedicados
+    if (messageObj.type === "ELECTION") {
+      try {
+        await axios.post(`${targetUrl}/election/elect`, { from: messageObj.from, term: messageObj.payload?.term }, { timeout: 1500 });
+      } catch (e) {}
+    } else if (messageObj.type === "COORDINATOR") {
+      try {
+        await axios.post(`${targetUrl}/election/coordinator`, { leader: messageObj.payload?.leader, url: messageObj.payload?.url, term: messageObj.payload?.term }, { timeout: 1500 });
+      } catch (e) {}
+    }
+  }
+}
+
+// Endpoint POST /election/message -> Motor de mensajería asíncrono para algoritmo Bully (Fase 3)
+app.post("/election/message", (req, res) => {
+  // Regla 2: Responder inmediatamente HTTP 200 con { ok: true }
+  res.status(200).json({ ok: true });
+
+  const { type, from, payload = {} } = req.body || {};
+  if (!type || !from || !from.url) return;
+
+  // Actualizar peer emisor en la tabla de conocidos
+  if (from.url !== MY_URL) {
+    if (!peers[from.url]) {
+      peers[from.url] = {
+        id: from.id || null,
+        url: from.url,
+        lastSeen: Date.now(),
+      };
+    } else {
+      peers[from.url].lastSeen = Date.now();
+      if (from.id) peers[from.url].id = from.id;
+    }
+  }
+
+  if (type === "ELECTION") {
+    // Si este nodo tiene mayor prioridad, responde con ANSWER asíncrono y toma el liderazgo
+    if (isHigherPriority(NODE_ID, from.id)) {
+      sendElectionMessage(from.url, {
+        type: "ANSWER",
+        from: { id: NODE_ID, url: MY_URL },
+        payload: { term: currentTerm },
+      });
+
+      if (!electionInProgress) {
+        startElection("challenged_by_lower_node");
+      }
+    }
+  } else if (type === "ANSWER") {
+    // Un nodo de mayor jerarquía respondió: nos mantenemos a la espera de COORDINATOR
+    if (electionInProgress && isHigherPriority(from.id, NODE_ID)) {
+      electionAnswerReceived = true;
+    }
+  } else if (type === "COORDINATOR") {
+    // Anuncio del nuevo líder electo
+    const newLeader = payload.leader || from.id;
+    const term = payload.term;
+    setLeader(newLeader, term !== undefined ? term : currentTerm, "bully", { fromElection: true });
+  }
+});
+
+// Endpoint POST /election/coordinator -> Anuncio de nuevo líder (compatibilidad)
 app.post("/election/coordinator", (req, res) => {
   const { leader, url, term } = req.body;
   if (!leader) {
@@ -609,15 +717,15 @@ async function becomeLeader() {
   await Promise.all(
     peerUrls.map(async (url) => {
       try {
-        await axios.post(
-          `${url}/election/coordinator`,
-          {
+        await sendElectionMessage(url, {
+          type: "COORDINATOR",
+          from: { id: NODE_ID, url: MY_URL },
+          payload: {
             leader: NODE_ID,
             url: MY_URL,
             term: currentTerm,
           },
-          { timeout: 1500 }
-        );
+        });
       } catch (err) {
         // Peer temporalmente inalcanzable
       }
@@ -625,10 +733,13 @@ async function becomeLeader() {
   );
 }
 
+let electionAnswerReceived = false;
+
 // Iniciar algoritmo de elección Bully
 async function startElection(reason = "normal") {
   if (electionInProgress) return;
   electionInProgress = true;
+  electionAnswerReceived = false;
   role = "candidate";
 
   if (reason !== "initial_election") {
@@ -651,6 +762,13 @@ async function startElection(reason = "normal") {
   await Promise.all(
     higherPeers.map(async (peer) => {
       try {
+        await sendElectionMessage(peer.url, {
+          type: "ELECTION",
+          from: { id: NODE_ID, url: MY_URL },
+          payload: { term: currentTerm },
+        });
+
+        // Intentar también endpoint /election/elect para máxima compatibilidad
         const res = await axios.post(
           `${peer.url}/election/elect`,
           {
@@ -669,18 +787,21 @@ async function startElection(reason = "normal") {
     })
   );
 
-  if (higherResponded) {
-    // Un nodo superior está activo y continuará la elección; esperamos mensaje coordinador
-    setTimeout(() => {
-      if (electionInProgress && role !== "leader") {
-        electionInProgress = false;
-        startElection("higher_timeout");
-      }
-    }, 4000);
-  } else {
-    // Ningún nodo superior respondió: este nodo gana la elección Bully
-    await becomeLeader();
-  }
+  // Esperar ventana para recibir ANSWER o respuesta HTTP
+  setTimeout(async () => {
+    if (higherResponded || electionAnswerReceived) {
+      // Un nodo superior está activo y continuará la elección; esperamos mensaje coordinador
+      setTimeout(() => {
+        if (electionInProgress && role !== "leader") {
+          electionInProgress = false;
+          startElection("higher_timeout");
+        }
+      }, 4000);
+    } else {
+      // Ningún nodo superior respondió: este nodo gana la elección Bully
+      await becomeLeader();
+    }
+  }, 1500);
 }
 
 // Verificación inicial de líder al arrancar el nodo
