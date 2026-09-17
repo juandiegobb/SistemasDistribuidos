@@ -43,19 +43,52 @@ function logCoord(message) {
 // Puertos locales estándar para auto-descubrimiento en localhost
 const LOCAL_DISCOVERY_PORTS = [3000, 3001, 3002, 3003];
 
-LOCAL_DISCOVERY_PORTS.forEach((p) => {
-  const url = `http://localhost:${p}`;
-  if (url !== MY_URL && p !== PORT) {
-    if (!peers[url]) {
-      const derivedId = String.fromCharCode(65 + (p - 3000));
-      peers[url] = {
-        id: (derivedId >= "A" && derivedId <= "Z") ? derivedId : null,
-        url: url,
-        lastSeen: 0,
-      };
+// Sondeo activo de puertos locales (solo agrega a peers los que responden online)
+async function probeLocalPeers() {
+  const payload = {
+    from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
+    peers: getFormattedPeers(),
+  };
+
+  for (const p of LOCAL_DISCOVERY_PORTS) {
+    if (p === PORT) continue;
+    const targetUrl = `http://localhost:${p}`;
+    if (peers[targetUrl]) continue; // Ya descubierto y monitoreado
+
+    try {
+      const resp = await axios.post(`${targetUrl}/election/ping`, payload, {
+        timeout: 800,
+        headers: { "ngrok-skip-browser-warning": "true" },
+      });
+
+      if (resp.data && resp.data.ok) {
+        const senderId = resp.data.from?.id || String.fromCharCode(65 + (p - 3000));
+        peers[targetUrl] = {
+          id: senderId,
+          url: targetUrl,
+          lastSeen: Date.now(),
+          failCount: 0,
+        };
+        logCoord(`Coordinador activo descubierto en ${targetUrl} (ID: ${senderId})`);
+
+        // Reconciliación de liderazgo Bully al descubrir peer activo
+        if (resp.data.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
+          setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
+        } else if (isHigherPriority(NODE_ID, senderId)) {
+          if (!electionInProgress && role !== "leader") {
+            startElection("discovered_lower_peer");
+          }
+        } else if (isHigherPriority(senderId, NODE_ID)) {
+          if (!electionInProgress) {
+            startElection("discovered_higher_peer");
+          }
+        }
+      }
+    } catch (e) {
+      // Puerto apagado o inactivo: NO se agrega a peers (la lista se mantiene limpia)
     }
   }
-});
+}
 
 // Si se proporcionó SEED_URL y es distinta a MY_URL, agregarla a la lista de peers inicial
 if (SEED_URL && SEED_URL !== MY_URL) {
@@ -1092,7 +1125,6 @@ const PING_INTERVAL_MS = 2500;
 
 async function sendPeerPings() {
   const peerUrls = Object.keys(peers);
-  if (peerUrls.length === 0) return;
 
   const payload = {
     from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
@@ -1107,6 +1139,7 @@ async function sendPeerPings() {
 
       if (peers[peerUrl]) {
         peers[peerUrl].lastSeen = Date.now();
+        peers[peerUrl].failCount = 0;
         if (response.data?.from?.id) {
           peers[peerUrl].id = response.data.from.id;
         }
@@ -1148,6 +1181,7 @@ async function sendPeerPings() {
               id: discoveredId || null,
               url: discoveredUrl,
               lastSeen: 0,
+              failCount: 0,
             };
             logCoord(`Nuevo peer descubierto vía respuesta de ${peerUrl}: ${discoveredUrl}`);
 
@@ -1171,16 +1205,28 @@ async function sendPeerPings() {
         });
       }
     } catch (err) {
-      // Peer temporalmente inalcanzable. Comprobar si era el líder actual
-      if (currentLeader && isPeerLeader(peerUrl)) {
-        if (!electionInProgress && role !== "leader") {
-          logCoord("Lider caído detectado. Iniciando eleccion Bully...");
-          currentLeader = null;
-          startElection("leader_ping_failed");
+      if (peers[peerUrl]) {
+        peers[peerUrl].failCount = (peers[peerUrl].failCount || 0) + 1;
+        const elapsed = Date.now() - (peers[peerUrl].lastSeen || 0);
+
+        // Si falla 2 veces consecutivas o pasan más de 4s, eliminar de la lista de peers
+        if (peers[peerUrl].failCount >= 2 || elapsed > 4000) {
+          const wasLeader = currentLeader && isPeerLeader(peerUrl);
+          logCoord(`Coordinador ${peerUrl} apagado/caído. Eliminado de la lista de peers.`);
+          delete peers[peerUrl];
+
+          if (wasLeader && !electionInProgress && role !== "leader") {
+            logCoord("Lider caído detectado. Iniciando eleccion Bully...");
+            currentLeader = null;
+            startElection("leader_ping_failed");
+          }
         }
       }
     }
   }
+
+  // Sondeo continuo de puertos locales para descubrir nuevos nodos iniciados
+  await probeLocalPeers();
 }
 
 // Iniciar rutina periódica de pings
@@ -1195,6 +1241,7 @@ setInterval(() => {
   if (leaderPeer && (leaderPeer.lastSeen || 0) > 0) {
     if (Date.now() - leaderPeer.lastSeen > 5000) {
       logCoord("Lider caído detectado. Iniciando eleccion Bully...");
+      delete peers[leaderPeer.url];
       currentLeader = null;
       startElection("leader_timeout");
     }
@@ -1231,12 +1278,28 @@ setInterval(() => {
   });
 }, 2500);
 
-app.listen(PORT, () => {
-  const totalNodes = Math.max(3, Object.keys(peers).length + 1);
+// Limpieza explícita al apagar el proceso (Ctrl+C / Kill)
+process.on("SIGINT", () => {
+  logCoord("Apagando servidor... vaciando lista de peers.");
+  peers = {};
+  process.exit(0);
+});
+
+process.on("SIGTERM", () => {
+  logCoord("Apagando servidor... vaciando lista de peers.");
+  peers = {};
+  process.exit(0);
+});
+
+app.listen(PORT, async () => {
+  const totalNodes = Object.keys(peers).length + 1;
   const quorum = Math.floor(totalNodes / 2) + 1;
-  logCoord(`Motor de eleccion arrancado (bully, preset lan, ${totalNodes} nodos, quorum ${quorum})`);
+  logCoord(`Motor de eleccion arrancado (bully, preset lan, ${totalNodes} nodo(s), quorum ${quorum})`);
+
+  // Descubrir inmediatamente peers activos en la red local
+  await probeLocalPeers();
 
   setTimeout(() => {
     checkInitialLeader();
-  }, 1000);
+  }, 400);
 });

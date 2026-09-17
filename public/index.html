@@ -452,18 +452,8 @@
         ? window.location.protocol 
         : "http:";
 
-      // Semillas iniciales conocidas (soporta 4 o más coordinadores por defecto)
-      const DEFAULT_PORTS = [3000, 3001, 3002, 3003];
-      const DEFAULT_SEEDS = [
-        ...DEFAULT_PORTS.map(p => `${currentProto}//${currentHost}:${p}`),
-        ...DEFAULT_PORTS.map(p => `http://localhost:${p}`),
-        ...DEFAULT_PORTS.map(p => `http://127.0.0.1:${p}`)
-      ];
-
-      // Conjunto de URLs de coordinadores conocidos (sin duplicados)
-      const knownCoordinators = new Set(DEFAULT_SEEDS);
-      
-      // Si la URL desde donde se carga el index.html no está en la lista, agregarla
+      // Conjunto de URLs de coordinadores conocidos (inicia solo con el nodo actual)
+      const knownCoordinators = new Set();
       if (window.location.origin && window.location.origin.startsWith("http")) {
         knownCoordinators.add(window.location.origin);
       }
@@ -610,13 +600,15 @@
             peers: data.peers || [],
             isOnline: true,
             latency: latency,
-            lastChecked: Date.now()
+            lastChecked: Date.now(),
+            failCount: 0
           };
 
           return coordinatorStates[url];
         } catch (err) {
           clearTimeout(timeoutId);
           const wasOnline = coordinatorStates[url]?.isOnline;
+          const prevFail = coordinatorStates[url]?.failCount || 0;
           
           coordinatorStates[url] = {
             id: coordinatorStates[url]?.id || "?",
@@ -628,11 +620,18 @@
             isOnline: false,
             latency: null,
             lastChecked: Date.now(),
-            error: err.message
+            error: err.message,
+            failCount: prevFail + 1
           };
 
           if (wasOnline === true) {
             addLog("DEAD", `Coordinador en ${url} dejó de responder (Timeout/Caído)`);
+          }
+
+          // Si un nodo no es el origen de la app y se apagó (falla 2 veces consecutivas), retirarlo de la interfaz
+          if (url !== window.location.origin && coordinatorStates[url].failCount >= 2) {
+            knownCoordinators.delete(url);
+            delete coordinatorStates[url];
           }
 
           return coordinatorStates[url];
@@ -641,6 +640,23 @@
 
       // Ciclo principal de sincronización del clúster
       async function syncCluster() {
+        // Auto-descubrir puertos candidatos activos en localhost
+        const candidatePorts = [3000, 3001, 3002, 3003];
+        for (const p of candidatePorts) {
+          const testUrl = `${currentProto}//${currentHost}:${p}`;
+          if (!knownCoordinators.has(testUrl)) {
+            try {
+              const res = await fetch(`${testUrl}/election/state`, {
+                headers: { "Accept": "application/json", "ngrok-skip-browser-warning": "true" },
+                signal: AbortSignal.timeout(600)
+              });
+              if (res.ok) {
+                knownCoordinators.add(testUrl);
+              }
+            } catch (e) {}
+          }
+        }
+
         const urls = Array.from(knownCoordinators);
         
         // Consultar todos los coordinadores en paralelo
@@ -1496,7 +1512,7 @@
 
       // Mensaje de arranque
       addLog("SYSTEM", "Centro de Control Unificado del Clúster inicializado.");
-      addLog("DISCOVERY", `Nodos semilla iniciales: ${Array.from(knownCoordinators).join(", ")}`);
+      addLog("DISCOVERY", `Nodo inicial: ${Array.from(knownCoordinators).join(", ")}`);
 
       // Arrancar loop de sincronización
       startPollingLoop();
