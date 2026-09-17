@@ -63,10 +63,12 @@ function logActivity(message) {
 function addKnownCoordinators(urls, defaultStatus = "no se") {
   if (!Array.isArray(urls)) return;
   urls.forEach((u) => {
-    if (u && typeof u === "string") {
-      const normalized = u.trim();
+    const rawUrl = typeof u === "string" ? u : u?.url;
+    if (rawUrl && typeof rawUrl === "string") {
+      const normalized = rawUrl.trim();
       if (!knownCoordinators[normalized]) {
-        knownCoordinators[normalized] = { status: defaultStatus, label: normalized };
+        const label = (typeof u === "object" && u?.id) ? `[${u.id}] ${normalized}` : normalized;
+        knownCoordinators[normalized] = { status: defaultStatus, label };
         logActivity(`Me entero de que existe ${normalized}`);
       }
     }
@@ -280,23 +282,38 @@ app.put("/config", updateParentUrl);
 app.post("/config", updateParentUrl);
 app.post("/update-parent-url", updateParentUrl);
 
+// Notificar al coordinador sobre la desconexión
+async function notifyDisconnect() {
+  if (!currentCoordinatorUrl || !NAME) return;
+  try {
+    await apiClient.post(`${currentCoordinatorUrl}/disconnect/${encodeURIComponent(NAME)}`, { name: NAME }, { timeout: 1000 });
+  } catch (e) {
+    // Si falla el endpoint dedicado, intentar compatibilidad con query o body
+    try {
+      await apiClient.post(`${currentCoordinatorUrl}/disconnect`, { name: NAME }, { timeout: 800 });
+    } catch (err) {}
+  }
+}
+
 // Shutdown
-app.post("/shutdown", (req, res) => {
+app.post("/shutdown", async (req, res) => {
   if (pulseInterval) {
     clearInterval(pulseInterval);
     pulseInterval = null;
-    logActivity("Pulsos detenidos por shutdown");
+    logActivity("Pulsos detenidos por shutdown. Notificando desconexión...");
   }
-  res.json({ message: `${NAME} dejó de enviar pulsos` });
+  await notifyDisconnect();
+  res.json({ message: `${NAME} desconectado y fuera de línea` });
 });
 
 // Kill
-const handleKill = (req, res) => {
+const handleKill = async (req, res) => {
   logActivity("Apagando servidor worker...");
   if (pulseInterval) {
     clearInterval(pulseInterval);
     pulseInterval = null;
   }
+  await notifyDisconnect();
   res.json({ message: `${NAME} detenido` });
   setTimeout(() => process.exit(0), 300);
 };
@@ -304,6 +321,25 @@ const handleKill = (req, res) => {
 app.post("/kill", handleKill);
 app.get("/kill", handleKill);
 app.post("/kill-server", handleKill);
+
+// Interceptar terminación del proceso (Ctrl+C en consola o kill de proceso)
+let isCleaningUp = false;
+async function handleProcessExit(signal) {
+  if (isCleaningUp) return;
+  isCleaningUp = true;
+  console.log(`\n[${NAME}] Señal ${signal} recibida. Notificando desconexión al coordinador...`);
+  if (pulseInterval) {
+    clearInterval(pulseInterval);
+    pulseInterval = null;
+  }
+  try {
+    await notifyDisconnect();
+  } catch (e) {}
+  process.exit(0);
+}
+
+process.on("SIGINT", () => handleProcessExit("SIGINT"));
+process.on("SIGTERM", () => handleProcessExit("SIGTERM"));
 
 // ==========================================================================
 // INTERFAZ VISUAL WEB (GET /)
@@ -635,6 +671,18 @@ app.get("/", (req, res) => {
       </form>
     </div>
 
+    <!-- APAGAR / MATAR WORKER -->
+    <div class="card" style="border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.05);">
+      <div class="card-title" style="color: #f87171; margin-bottom: 8px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+        CONTROL DE APAGADO
+      </div>
+      <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+        <span style="font-size: 13px; color: var(--text-muted);">Apagar este proceso y notificar al coordinador:</span>
+        <button type="button" id="killWorkerBtn" class="btn" style="background: #ef4444; color: #fff; padding: 8px 18px; font-size: 13px;">Matar Worker</button>
+      </div>
+    </div>
+
     <!-- CAMBIAR DE COORDINADOR A MANO -->
     <details>
       <summary>Cambiar de coordinador a mano</summary>
@@ -650,7 +698,7 @@ app.get("/", (req, res) => {
       try {
         const res = await fetch('/worker-state');
         if (!res.ok) return;
-        const state = await res.data ? res.data : await res.json();
+        const state = await res.json();
 
         // 1. Header
         document.getElementById('leadUrl').textContent = state.currentCoordinatorUrl || 'Buscando líder...';
@@ -746,6 +794,18 @@ app.get("/", (req, res) => {
         updateState();
       } catch (e) {
         alert('Error cambiando coordinador');
+      }
+    });
+
+    // Matar este worker
+    document.getElementById('killWorkerBtn').addEventListener('click', async () => {
+      if (!confirm('¿Seguro que deseas apagar este worker?')) return;
+      try {
+        await fetch('/kill', { method: 'POST' });
+        alert('Worker apagado correctamente.');
+        document.body.innerHTML = '<div style="font-family: monospace; color: #f87171; text-align: center; padding-top: 20vh; font-size: 20px;">✓ Worker detenido y desconectado del clúster.</div>';
+      } catch (e) {
+        alert('Worker detenido.');
       }
     });
   </script>

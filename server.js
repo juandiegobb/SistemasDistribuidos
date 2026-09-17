@@ -47,8 +47,9 @@ LOCAL_DISCOVERY_PORTS.forEach((p) => {
   const url = `http://localhost:${p}`;
   if (url !== MY_URL && p !== PORT) {
     if (!peers[url]) {
+      const derivedId = String.fromCharCode(65 + (p - 3000));
       peers[url] = {
-        id: null,
+        id: (derivedId >= "A" && derivedId <= "Z") ? derivedId : null,
         url: url,
         lastSeen: 0,
       };
@@ -250,7 +251,7 @@ app.post("/kill-server/:name", async (req, res) => {
   // Notificar al proceso del miniServer para que se apague
   if (servers[name]?.url) {
     try {
-      fetch(`${servers[name].url}/kill`, { method: "POST" }).catch(() => { });
+      axios.post(`${servers[name].url}/kill`, {}, { timeout: 1000 }).catch(() => { });
     } catch (e) { }
   }
 
@@ -263,29 +264,59 @@ app.post("/kill-server/:name", async (req, res) => {
     delete serverProcesses[name];
   }
 
-  delete servers[name];
+  if (servers[name]) {
+    servers[name].status = "offline";
+  }
 
   recordMessage({
     sender: "Middleware",
-    message: `Servidor [${name}] ha sido detenido/eliminado`,
+    message: `Servidor [${name}] ha sido detenido/marcado offline`,
     target: name,
     type: "system_alert",
   });
 
-  console.log(`Server ${name} is killed`);
-  res.json({ message: `${name} killed` });
+  logCoord(`Server ${name} detenido / marcado como offline`);
+  res.json({ message: `${name} killed / offline`, server: servers[name] });
 });
+
+// Desconectar servidor explícitamente (marcar como offline)
+const handleDisconnect = (req, res) => {
+  const name = req.params.name || req.body?.name;
+  if (name && servers[name]) {
+    servers[name].status = "offline";
+    logCoord(`Worker [${name}] se ha desconectado.`);
+    recordMessage({
+      sender: name,
+      message: `Servidor [${name}] desconectado / fuera de línea`,
+      target: "Middleware",
+      type: "system_alert",
+    });
+    return res.json({ message: `Server ${name} marcado como offline`, server: servers[name] });
+  }
+  res.status(404).json({ error: "Server not found" });
+};
+
+app.post("/disconnect", handleDisconnect);
+app.post("/disconnect/:name", handleDisconnect);
+app.post("/unregister", handleDisconnect);
+app.post("/unregister/:name", handleDisconnect);
 
 // Obtener Servidores activos (compatible con frontend y scripts)
 app.get("/servers", (req, res) => {
   const now = Date.now();
-  const serverList = Object.values(servers).map((s) => ({
-    ...s,
-    ageSeconds: Math.floor((now - s.lastHeartbeat) / 1000),
-    elapsedSeconds: Math.floor((now - s.lastHeartbeat) / 1000),
-    isOnline: s.status === "active" && now - s.lastHeartbeat <= 15000,
-    isHealthy: s.status === "active" && now - s.lastHeartbeat <= 15000,
-  }));
+  const TIMEOUT_MS = 10000;
+  const serverList = Object.values(servers).map((s) => {
+    const elapsed = Math.floor((now - s.lastHeartbeat) / 1000);
+    const isOnline = s.status === "active" && (now - s.lastHeartbeat) <= TIMEOUT_MS;
+    return {
+      ...s,
+      status: isOnline ? "active" : "offline",
+      ageSeconds: elapsed,
+      elapsedSeconds: elapsed,
+      isOnline: isOnline,
+      isHealthy: isOnline,
+    };
+  });
   res.json(serverList);
 });
 
@@ -495,6 +526,32 @@ function setLeader(newLeader, term, algo = "bully", options = {}) {
   }
 }
 
+// Obtener lista de peers formateada con { id, url, alive }
+function getFormattedPeers() {
+  const now = Date.now();
+  const TIMEOUT_MS = 10000;
+
+  return Object.values(peers).map((p) => {
+    let derivedId = p.id;
+    if (!derivedId && p.url) {
+      try {
+        const port = Number(new URL(p.url).port);
+        if (port >= 3000 && port <= 3025) {
+          derivedId = String.fromCharCode(65 + (port - 3000));
+        }
+      } catch (e) {}
+    }
+
+    const isAlive = (p.lastSeen || 0) > 0 && (now - p.lastSeen <= TIMEOUT_MS);
+
+    return {
+      id: derivedId || null,
+      url: p.url,
+      alive: isAlive,
+    };
+  });
+}
+
 // Obtener estado serializable del nodo y su cluster
 function getElectionState() {
   const now = Date.now();
@@ -548,10 +605,12 @@ app.post("/election/ping", (req, res) => {
 
   // Descubrir nuevos peers propagados en la lista (gossip / chisme)
   if (Array.isArray(incomingPeers)) {
-    incomingPeers.forEach((peerUrl) => {
-      if (peerUrl && peerUrl !== MY_URL && !peers[peerUrl]) {
+    incomingPeers.forEach((peerItem) => {
+      const peerUrl = typeof peerItem === "object" && peerItem !== null ? peerItem.url : peerItem;
+      const peerId = typeof peerItem === "object" && peerItem !== null ? peerItem.id : null;
+      if (peerUrl && typeof peerUrl === "string" && peerUrl.startsWith("http") && peerUrl !== MY_URL && !peers[peerUrl]) {
         peers[peerUrl] = {
-          id: null,
+          id: peerId || null,
           url: peerUrl,
           lastSeen: 0,
         };
@@ -560,7 +619,7 @@ app.post("/election/ping", (req, res) => {
         // Handshake inmediato para sincronizar estado con el peer recién descubierto
         axios.post(`${peerUrl}/election/ping`, {
           from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
-          peers: Object.keys(peers),
+          peers: getFormattedPeers(),
         }, { timeout: 1200 }).then((resp) => {
           if (peers[peerUrl]) {
             peers[peerUrl].lastSeen = Date.now();
@@ -575,7 +634,7 @@ app.post("/election/ping", (req, res) => {
               payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
             });
           }
-        }).catch(() => {});
+        }).catch(() => { });
       }
     });
   }
@@ -603,14 +662,157 @@ app.post("/election/ping", (req, res) => {
     }
   }
 
-  // Responder con acuse de recibo, identidad, rol, líder y término actual
+  // Responder con acuse de recibo, identidad, rol, líder, término actual y peers con id, url, alive
   res.json({
     ok: true,
     from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
     role,
     currentLeader,
     currentTerm,
-    peers: Object.keys(peers),
+    peers: getFormattedPeers(),
+  });
+});
+
+// Endpoint POST /election/seed o POST /seed -> Plantar una semilla (hacer ping activo a otro coordinador)
+app.post(["/election/seed", "/seed"], async (req, res) => {
+  const { url: targetUrl, peerUrl } = req.body;
+  const rawUrl = targetUrl || peerUrl;
+
+  if (!rawUrl || typeof rawUrl !== "string" || !rawUrl.startsWith("http")) {
+    return res.status(400).json({ ok: false, error: "Se requiere una URL válida de coordinador (ej: http://localhost:3002)" });
+  }
+
+  const cleanUrl = rawUrl.trim().replace(/\/+$/, "");
+  if (cleanUrl === MY_URL) {
+    return res.status(400).json({ ok: false, error: "No puedes plantarte a ti mismo como semilla" });
+  }
+
+  // Registrar el peer localmente si no existe
+  if (!peers[cleanUrl]) {
+    peers[cleanUrl] = {
+      id: null,
+      url: cleanUrl,
+      lastSeen: 0,
+    };
+  }
+
+  logCoord(`Plantando semilla / enviando ping a coordinador: ${cleanUrl}`);
+
+  try {
+    const payload = {
+      from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
+      peers: getFormattedPeers(),
+    };
+
+    const response = await axios.post(`${cleanUrl}/election/ping`, payload, {
+      timeout: 3000,
+      headers: { "ngrok-skip-browser-warning": "true" },
+    });
+
+    if (peers[cleanUrl]) {
+      peers[cleanUrl].lastSeen = Date.now();
+      if (response.data?.from?.id) {
+        peers[cleanUrl].id = response.data.from.id;
+      }
+    }
+
+    // Incorporar los peers que devolvió el nodo semilla
+    if (Array.isArray(response.data?.peers)) {
+      response.data.peers.forEach((peerItem) => {
+        const discoveredUrl = typeof peerItem === "object" && peerItem !== null ? peerItem.url : peerItem;
+        const discoveredId = typeof peerItem === "object" && peerItem !== null ? peerItem.id : null;
+        if (discoveredUrl && typeof discoveredUrl === "string" && discoveredUrl.startsWith("http") && discoveredUrl !== MY_URL && !peers[discoveredUrl]) {
+          peers[discoveredUrl] = {
+            id: discoveredId || null,
+            url: discoveredUrl,
+            lastSeen: 0,
+          };
+          logCoord(`Nuevo peer descubierto vía semilla ${cleanUrl}: ${discoveredUrl}`);
+        }
+      });
+    }
+
+    // Reconciliar liderazgo Bully si el nodo semilla o reportado es de mayor jerarquía
+    if (response.data?.role === "leader" && response.data?.currentLeader) {
+      if (isHigherPriority(NODE_ID, response.data.currentLeader)) {
+        if (!electionInProgress && role !== "candidate") {
+          setTimeout(() => startElection("bully_superior_node"), 100);
+        }
+      } else if (NODE_ID !== response.data.currentLeader) {
+        if (currentLeader !== response.data.currentLeader || role === "leader") {
+          setLeader(response.data.currentLeader, response.data.currentTerm || currentTerm, "bully", { fromElection: false });
+        }
+      }
+    } else if (response.data?.from?.id && role === "leader" && isHigherPriority(response.data.from.id, NODE_ID)) {
+      if (!electionInProgress) {
+        setTimeout(() => startElection("higher_peer_detected"), 100);
+      }
+    }
+
+    res.json({
+      ok: true,
+      message: `Semilla plantada exitosamente con ${cleanUrl}`,
+      node: NODE_ID,
+      peer: peers[cleanUrl],
+      data: response.data,
+    });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: `No se pudo conectar con el coordinador en ${cleanUrl}: ${err.message}`,
+    });
+  }
+});
+
+// Endpoint POST /peers/remove o DELETE /peers -> Eliminar/olvidar un coordinador de la lista de peers
+app.all(["/peers/remove", "/peers/delete", "/election/peers/remove"], (req, res) => {
+  const targetUrl = req.body?.url || req.query?.url;
+  if (!targetUrl) {
+    return res.status(400).json({ ok: false, error: "Se requiere 'url' del coordinador a eliminar" });
+  }
+
+  const cleanUrl = targetUrl.trim().replace(/\/+$/, "");
+  let deleted = false;
+
+  Object.keys(peers).forEach((pUrl) => {
+    if (pUrl === cleanUrl || pUrl.replace(/\/+$/, "") === cleanUrl) {
+      delete peers[pUrl];
+      deleted = true;
+    }
+  });
+
+  if (deleted) {
+    logCoord(`Coordinador eliminado de la lista de peers: ${cleanUrl}`);
+  }
+
+  res.json({
+    ok: true,
+    message: deleted ? `Coordinador ${cleanUrl} eliminado de la red` : `No se encontró el coordinador ${cleanUrl}`,
+    peers: getFormattedPeers(),
+  });
+});
+
+// Endpoint POST /peers/clear-offline -> Limpiar todos los coordinadores offline / caídos
+app.all(["/peers/clear-offline", "/peers/clear", "/election/peers/clear"], (req, res) => {
+  const now = Date.now();
+  const TIMEOUT_MS = 10000;
+  const removed = [];
+
+  Object.entries(peers).forEach(([pUrl, pData]) => {
+    const isAlive = (pData.lastSeen || 0) > 0 && (now - pData.lastSeen <= TIMEOUT_MS);
+    if (!isAlive) {
+      delete peers[pUrl];
+      removed.push(pUrl);
+    }
+  });
+
+  logCoord(`Limpieza de coordinadores offline ejecutada. Removidos: ${removed.length}`);
+
+  res.json({
+    ok: true,
+    message: `Se eliminaron ${removed.length} coordinadores offline`,
+    removed,
+    peers: getFormattedPeers(),
   });
 });
 
@@ -653,11 +855,11 @@ async function sendElectionMessage(targetUrl, messageObj) {
     if (messageObj.type === "ELECTION") {
       try {
         await axios.post(`${targetUrl}/election/elect`, { from: messageObj.from, term: messageObj.payload?.term }, { timeout: 1500 });
-      } catch (e) {}
+      } catch (e) { }
     } else if (messageObj.type === "COORDINATOR") {
       try {
         await axios.post(`${targetUrl}/election/coordinator`, { leader: messageObj.payload?.leader, url: messageObj.payload?.url, term: messageObj.payload?.term }, { timeout: 1500 });
-      } catch (e) {}
+      } catch (e) { }
     }
   }
 }
@@ -749,7 +951,7 @@ app.get("/election/state", (req, res) => {
     role: role,
     leader: currentLeader,
     leaderUrl: leaderUrl,
-    peers: Object.keys(peers),
+    peers: getFormattedPeers(),
   });
 });
 
@@ -894,7 +1096,7 @@ async function sendPeerPings() {
 
   const payload = {
     from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
-    peers: peerUrls,
+    peers: getFormattedPeers(),
   };
 
   for (const peerUrl of peerUrls) {
@@ -938,10 +1140,12 @@ async function sendPeerPings() {
 
       // Incorporar nuevos pares reportados en la respuesta
       if (Array.isArray(response.data?.peers)) {
-        response.data.peers.forEach((discoveredUrl) => {
-          if (discoveredUrl && discoveredUrl !== MY_URL && !peers[discoveredUrl]) {
+        response.data.peers.forEach((peerItem) => {
+          const discoveredUrl = typeof peerItem === "object" && peerItem !== null ? peerItem.url : peerItem;
+          const discoveredId = typeof peerItem === "object" && peerItem !== null ? peerItem.id : null;
+          if (discoveredUrl && typeof discoveredUrl === "string" && discoveredUrl.startsWith("http") && discoveredUrl !== MY_URL && !peers[discoveredUrl]) {
             peers[discoveredUrl] = {
-              id: null,
+              id: discoveredId || null,
               url: discoveredUrl,
               lastSeen: 0,
             };
@@ -962,7 +1166,7 @@ async function sendPeerPings() {
                   payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
                 });
               }
-            }).catch(() => {});
+            }).catch(() => { });
           }
         });
       }
@@ -1000,7 +1204,7 @@ setInterval(() => {
 // Timeout check periódico de servidores
 setInterval(() => {
   const now = Date.now();
-  const timeout = 15000;
+  const timeout = 10000;
 
   Object.keys(servers).forEach((name) => {
     if (now - servers[name].lastHeartbeat > timeout) {
@@ -1010,7 +1214,7 @@ setInterval(() => {
 
         recordMessage({
           sender: "Sistema",
-          message: `Servidor [${name}] desconectado por inactividad (>15s sin pulso)`,
+          message: `Servidor [${name}] desconectado por inactividad (>10s sin pulso)`,
           target: name,
           type: "system_alert",
         });
@@ -1025,7 +1229,7 @@ setInterval(() => {
       // Se eliminó el delete servers[name] para mantener el nodo persistente como offline
     }
   });
-}, 10000);
+}, 2500);
 
 app.listen(PORT, () => {
   const totalNodes = Math.max(3, Object.keys(peers).length + 1);
