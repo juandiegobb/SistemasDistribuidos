@@ -1,5 +1,30 @@
+const path = require("path");
+const fs = require("fs");
 const express = require("express");
 const axios = require("axios");
+
+// Cargar variables de entorno desde archivo .env si existe
+const envPath = path.join(__dirname, ".env");
+if (fs.existsSync(envPath)) {
+  try {
+    const envContent = fs.readFileSync(envPath, "utf-8");
+    envContent.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const idx = trimmed.indexOf("=");
+        if (idx !== -1) {
+          const key = trimmed.substring(0, idx).trim();
+          const val = trimmed.substring(idx + 1).trim();
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Error cargando .env:", err.message);
+  }
+}
 
 const app = express();
 app.use(express.json());
@@ -17,7 +42,7 @@ app.use((req, res, next) => {
 
 const PORT = Number(process.argv[2]) || 4000;
 const NAME = process.argv[3] || "worker-1";
-let MY_WORKER_URL = `http://localhost:${PORT}`;
+let MY_WORKER_URL = process.env.WORKER_URL || `http://localhost:${PORT}`;
 
 // Configuración de Axios con cabeceras ngrok
 const apiClient = axios.create({
@@ -29,7 +54,7 @@ const apiClient = axios.create({
 });
 
 // Coordinador inicial (por defecto o por parámetro process.argv[4])
-let currentCoordinatorUrl = process.argv[4] || "http://localhost:3000";
+let currentCoordinatorUrl = process.argv[4] || process.env.PUBLIC_URL || "http://localhost:3000";
 
 // Mapa de coordinadores conocidos: { [url]: { status: "no se" | "LIDER" | "no manda" | "no responde", label: string } }
 let knownCoordinators = {

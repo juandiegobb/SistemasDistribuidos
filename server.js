@@ -3,7 +3,33 @@ const fs = require("fs");
 const express = require("express");
 const axios = require("axios");
 
+// Configuración global para compatibilidad con túneles ngrok
+axios.defaults.headers.common["ngrok-skip-browser-warning"] = "true";
+
 const app = express();
+
+// Cargar variables de entorno desde archivo .env si existe
+const envPath = path.join(__dirname, ".env");
+if (fs.existsSync(envPath)) {
+  try {
+    const envContent = fs.readFileSync(envPath, "utf-8");
+    envContent.split(/\r?\n/).forEach((line) => {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const idx = trimmed.indexOf("=");
+        if (idx !== -1) {
+          const key = trimmed.substring(0, idx).trim();
+          const val = trimmed.substring(idx + 1).trim();
+          if (!process.env[key]) {
+            process.env[key] = val;
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Error cargando .env:", err.message);
+  }
+}
 
 app.use(express.json());
 
@@ -25,7 +51,9 @@ app.use(express.static(path.join(__dirname, "public")));
 const NODE_ID = process.argv[2] || "A";
 const PORT = Number(process.argv[3]) || 3000;
 const SEED_URL = process.argv[4] || null;
-const MY_URL = `http://localhost:${PORT}`;
+const MY_URL = (PORT === 3000 && process.env.PUBLIC_URL)
+  ? process.env.PUBLIC_URL
+  : (process.env[`PUBLIC_URL_${NODE_ID}`] || (process.argv[3] ? `http://localhost:${PORT}` : (process.env.PUBLIC_URL || `http://localhost:${PORT}`)));
 
 // Variables de estado del nodo
 let role = "follower"; // "leader" | "candidate" | "follower"
@@ -33,6 +61,7 @@ let currentLeader = null;
 let currentTerm = 0;
 let electionInProgress = false;
 let peers = {};
+const deadPeers = new Map(); // url -> timestamp de caída para prevenir bucles de chisme (gossip thrashing)
 
 // Función Helper de Logging Centralizada para Coordinadores
 function logCoord(message) {
@@ -62,6 +91,7 @@ async function probeLocalPeers() {
       });
 
       if (resp.data && resp.data.ok) {
+        deadPeers.delete(targetUrl);
         const senderId = resp.data.from?.id || String.fromCharCode(65 + (p - 3000));
         peers[targetUrl] = {
           id: senderId,
@@ -146,7 +176,7 @@ const startTime = Date.now();
 // Almacenamiento en memoria
 let servers = {};
 let serverProcesses = {};
-let nextPort = 4000;
+//let nextPort = 4000;
 
 // Historial general de mensajes y por servidor
 let messagesByServer = {};
@@ -559,30 +589,30 @@ function setLeader(newLeader, term, algo = "bully", options = {}) {
   }
 }
 
-// Obtener lista de peers formateada con { id, url, alive }
+// Obtener lista de peers formateada con { id, url, alive } (solo pares activos para evitar propagar caídos)
 function getFormattedPeers() {
   const now = Date.now();
-  const TIMEOUT_MS = 10000;
+  const TIMEOUT_MS = 6000;
 
-  return Object.values(peers).map((p) => {
-    let derivedId = p.id;
-    if (!derivedId && p.url) {
-      try {
-        const port = Number(new URL(p.url).port);
-        if (port >= 3000 && port <= 3025) {
-          derivedId = String.fromCharCode(65 + (port - 3000));
-        }
-      } catch (e) {}
-    }
+  return Object.values(peers)
+    .filter((p) => (p.lastSeen || 0) > 0 && (now - p.lastSeen <= TIMEOUT_MS) && (p.failCount || 0) < 2)
+    .map((p) => {
+      let derivedId = p.id;
+      if (!derivedId && p.url) {
+        try {
+          const port = Number(new URL(p.url).port);
+          if (port >= 3000 && port <= 3025) {
+            derivedId = String.fromCharCode(65 + (port - 3000));
+          }
+        } catch (e) { }
+      }
 
-    const isAlive = (p.lastSeen || 0) > 0 && (now - p.lastSeen <= TIMEOUT_MS);
-
-    return {
-      id: derivedId || null,
-      url: p.url,
-      alive: isAlive,
-    };
-  });
+      return {
+        id: derivedId || null,
+        url: p.url,
+        alive: true,
+      };
+    });
 }
 
 // Obtener estado serializable del nodo y su cluster
@@ -618,11 +648,13 @@ app.post("/election/ping", (req, res) => {
 
   // Actualizar o registrar el peer emisor si es distinto al nodo local
   if (senderUrl !== MY_URL) {
+    deadPeers.delete(senderUrl);
     const isNew = !peers[senderUrl];
     peers[senderUrl] = {
       id: senderId,
       url: senderUrl,
       lastSeen: Date.now(),
+      failCount: 0,
     };
 
     if (isNew) {
@@ -641,33 +673,49 @@ app.post("/election/ping", (req, res) => {
     incomingPeers.forEach((peerItem) => {
       const peerUrl = typeof peerItem === "object" && peerItem !== null ? peerItem.url : peerItem;
       const peerId = typeof peerItem === "object" && peerItem !== null ? peerItem.id : null;
-      if (peerUrl && typeof peerUrl === "string" && peerUrl.startsWith("http") && peerUrl !== MY_URL && !peers[peerUrl]) {
-        peers[peerUrl] = {
-          id: peerId || null,
-          url: peerUrl,
-          lastSeen: 0,
-        };
-        logCoord(`Peer aprendido por propagación: ${peerUrl}`);
+      const isAlive = typeof peerItem === "object" && peerItem !== null ? peerItem.alive : true;
 
-        // Handshake inmediato para sincronizar estado con el peer recién descubierto
+      if (
+        peerUrl &&
+        typeof peerUrl === "string" &&
+        peerUrl.startsWith("http") &&
+        peerUrl !== MY_URL &&
+        !peers[peerUrl] &&
+        isAlive !== false
+      ) {
+        const deadSince = deadPeers.get(peerUrl);
+        if (deadSince && Date.now() - deadSince < 15000) {
+          return; // Ignorar peer recientemente caído para evitar bucle de chisme
+        }
+
+        // Handshake previo: SOLO agregar y loguear si responde positivamente
         axios.post(`${peerUrl}/election/ping`, {
           from: { id: NODE_ID, url: MY_URL, role, currentLeader, term: currentTerm },
           peers: getFormattedPeers(),
         }, { timeout: 1200 }).then((resp) => {
-          if (peers[peerUrl]) {
-            peers[peerUrl].lastSeen = Date.now();
-            if (resp.data?.from?.id) peers[peerUrl].id = resp.data.from.id;
+          if (resp.data && resp.data.ok) {
+            deadPeers.delete(peerUrl);
+            peers[peerUrl] = {
+              id: resp.data.from?.id || peerId || null,
+              url: peerUrl,
+              lastSeen: Date.now(),
+              failCount: 0,
+            };
+            logCoord(`Peer aprendido por propagación: ${peerUrl}`);
+
+            if (resp.data?.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
+              setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
+            } else if (role === "leader") {
+              sendElectionMessage(peerUrl, {
+                type: "COORDINATOR",
+                from: { id: NODE_ID, url: MY_URL },
+                payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
+              });
+            }
           }
-          if (resp.data?.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
-            setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
-          } else if (role === "leader") {
-            sendElectionMessage(peerUrl, {
-              type: "COORDINATOR",
-              from: { id: NODE_ID, url: MY_URL },
-              payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
-            });
-          }
-        }).catch(() => { });
+        }).catch(() => {
+          deadPeers.set(peerUrl, Date.now());
+        });
       }
     });
   }
@@ -749,18 +797,37 @@ app.post(["/election/seed", "/seed"], async (req, res) => {
       }
     }
 
-    // Incorporar los peers que devolvió el nodo semilla
+    // Incorporar los peers que devolvió el nodo semilla (verificando conectividad)
     if (Array.isArray(response.data?.peers)) {
       response.data.peers.forEach((peerItem) => {
         const discoveredUrl = typeof peerItem === "object" && peerItem !== null ? peerItem.url : peerItem;
         const discoveredId = typeof peerItem === "object" && peerItem !== null ? peerItem.id : null;
-        if (discoveredUrl && typeof discoveredUrl === "string" && discoveredUrl.startsWith("http") && discoveredUrl !== MY_URL && !peers[discoveredUrl]) {
-          peers[discoveredUrl] = {
-            id: discoveredId || null,
-            url: discoveredUrl,
-            lastSeen: 0,
-          };
-          logCoord(`Nuevo peer descubierto vía semilla ${cleanUrl}: ${discoveredUrl}`);
+        const isAlive = typeof peerItem === "object" && peerItem !== null ? peerItem.alive : true;
+        if (
+          discoveredUrl &&
+          typeof discoveredUrl === "string" &&
+          discoveredUrl.startsWith("http") &&
+          discoveredUrl !== MY_URL &&
+          !peers[discoveredUrl] &&
+          isAlive !== false
+        ) {
+          const deadSince = deadPeers.get(discoveredUrl);
+          if (deadSince && Date.now() - deadSince < 15000) return;
+
+          axios.post(`${discoveredUrl}/election/ping`, payload, { timeout: 1200 }).then((resp) => {
+            if (resp.data && resp.data.ok) {
+              deadPeers.delete(discoveredUrl);
+              peers[discoveredUrl] = {
+                id: resp.data.from?.id || discoveredId || null,
+                url: discoveredUrl,
+                lastSeen: Date.now(),
+                failCount: 0,
+              };
+              logCoord(`Nuevo peer descubierto vía semilla ${cleanUrl}: ${discoveredUrl}`);
+            }
+          }).catch(() => {
+            deadPeers.set(discoveredUrl, Date.now());
+          });
         }
       });
     }
@@ -810,6 +877,7 @@ app.all(["/peers/remove", "/peers/delete", "/election/peers/remove"], (req, res)
   Object.keys(peers).forEach((pUrl) => {
     if (pUrl === cleanUrl || pUrl.replace(/\/+$/, "") === cleanUrl) {
       delete peers[pUrl];
+      deadPeers.set(pUrl, Date.now());
       deleted = true;
     }
   });
@@ -828,13 +896,14 @@ app.all(["/peers/remove", "/peers/delete", "/election/peers/remove"], (req, res)
 // Endpoint POST /peers/clear-offline -> Limpiar todos los coordinadores offline / caídos
 app.all(["/peers/clear-offline", "/peers/clear", "/election/peers/clear"], (req, res) => {
   const now = Date.now();
-  const TIMEOUT_MS = 10000;
+  const TIMEOUT_MS = 6000;
   const removed = [];
 
   Object.entries(peers).forEach(([pUrl, pData]) => {
-    const isAlive = (pData.lastSeen || 0) > 0 && (now - pData.lastSeen <= TIMEOUT_MS);
+    const isAlive = (pData.lastSeen || 0) > 0 && (now - pData.lastSeen <= TIMEOUT_MS) && (pData.failCount || 0) < 2;
     if (!isAlive) {
       delete peers[pUrl];
+      deadPeers.set(pUrl, Date.now());
       removed.push(pUrl);
     }
   });
@@ -1171,36 +1240,48 @@ async function sendPeerPings() {
         }
       }
 
-      // Incorporar nuevos pares reportados en la respuesta
+      // Incorporar nuevos pares reportados en la respuesta (verificando conectividad)
       if (Array.isArray(response.data?.peers)) {
         response.data.peers.forEach((peerItem) => {
           const discoveredUrl = typeof peerItem === "object" && peerItem !== null ? peerItem.url : peerItem;
           const discoveredId = typeof peerItem === "object" && peerItem !== null ? peerItem.id : null;
-          if (discoveredUrl && typeof discoveredUrl === "string" && discoveredUrl.startsWith("http") && discoveredUrl !== MY_URL && !peers[discoveredUrl]) {
-            peers[discoveredUrl] = {
-              id: discoveredId || null,
-              url: discoveredUrl,
-              lastSeen: 0,
-              failCount: 0,
-            };
-            logCoord(`Nuevo peer descubierto vía respuesta de ${peerUrl}: ${discoveredUrl}`);
+          const isAlive = typeof peerItem === "object" && peerItem !== null ? peerItem.alive : true;
+          if (
+            discoveredUrl &&
+            typeof discoveredUrl === "string" &&
+            discoveredUrl.startsWith("http") &&
+            discoveredUrl !== MY_URL &&
+            !peers[discoveredUrl] &&
+            isAlive !== false
+          ) {
+            const deadSince = deadPeers.get(discoveredUrl);
+            if (deadSince && Date.now() - deadSince < 15000) return;
 
-            // Sincronización inmediata con el nuevo peer
+            // Sincronización y verificación previa con el nuevo peer antes de agregarlo
             axios.post(`${discoveredUrl}/election/ping`, payload, { timeout: 1200 }).then((resp) => {
-              if (peers[discoveredUrl]) {
-                peers[discoveredUrl].lastSeen = Date.now();
-                if (resp.data?.from?.id) peers[discoveredUrl].id = resp.data.from.id;
+              if (resp.data && resp.data.ok) {
+                deadPeers.delete(discoveredUrl);
+                peers[discoveredUrl] = {
+                  id: resp.data.from?.id || discoveredId || null,
+                  url: discoveredUrl,
+                  lastSeen: Date.now(),
+                  failCount: 0,
+                };
+                logCoord(`Nuevo peer descubierto vía respuesta de ${peerUrl}: ${discoveredUrl}`);
+
+                if (resp.data?.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
+                  setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
+                } else if (role === "leader") {
+                  sendElectionMessage(discoveredUrl, {
+                    type: "COORDINATOR",
+                    from: { id: NODE_ID, url: MY_URL },
+                    payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
+                  });
+                }
               }
-              if (resp.data?.role === "leader" && isHigherPriority(resp.data.currentLeader, NODE_ID)) {
-                setLeader(resp.data.currentLeader, resp.data.currentTerm || currentTerm, "bully", { fromElection: false });
-              } else if (role === "leader") {
-                sendElectionMessage(discoveredUrl, {
-                  type: "COORDINATOR",
-                  from: { id: NODE_ID, url: MY_URL },
-                  payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
-                });
-              }
-            }).catch(() => { });
+            }).catch(() => {
+              deadPeers.set(discoveredUrl, Date.now());
+            });
           }
         });
       }
@@ -1214,6 +1295,7 @@ async function sendPeerPings() {
           const wasLeader = currentLeader && isPeerLeader(peerUrl);
           logCoord(`Coordinador ${peerUrl} apagado/caído. Eliminado de la lista de peers.`);
           delete peers[peerUrl];
+          deadPeers.set(peerUrl, Date.now());
 
           if (wasLeader && !electionInProgress && role !== "leader") {
             logCoord("Lider caído detectado. Iniciando eleccion Bully...");
@@ -1242,6 +1324,7 @@ setInterval(() => {
     if (Date.now() - leaderPeer.lastSeen > 5000) {
       logCoord("Lider caído detectado. Iniciando eleccion Bully...");
       delete peers[leaderPeer.url];
+      deadPeers.set(leaderPeer.url, Date.now());
       currentLeader = null;
       startElection("leader_timeout");
     }
@@ -1295,6 +1378,7 @@ app.listen(PORT, async () => {
   const totalNodes = Object.keys(peers).length + 1;
   const quorum = Math.floor(totalNodes / 2) + 1;
   logCoord(`Motor de eleccion arrancado (bully, preset lan, ${totalNodes} nodo(s), quorum ${quorum})`);
+  logCoord(`Servidor activo en ${MY_URL} (puerto local ${PORT})`);
 
   // Descubrir inmediatamente peers activos en la red local
   await probeLocalPeers();
