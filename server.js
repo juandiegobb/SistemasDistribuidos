@@ -47,13 +47,53 @@ app.use((req, res, next) => {
 // Servir archivos estáticos del dashboard visual
 app.use(express.static(path.join(__dirname, "public")));
 
+// ==========================================================================
+// CONSTANTES DE TIEMPO DEL SISTEMA (sección 5 AGENTS.md) — C4
+// ==========================================================================
+const PING_INTERVAL_MS  = 2000;  // Intervalo de ping entre coordinadores
+const PING_TIMEOUT_MS   = 5000;  // Timeout de cada ping entre coordinadores
+const PING_RETRIES      = 3;     // Fallos consecutivos antes de eliminar un peer
+const PULSE_INTERVAL_MS = 3000;  // Intervalo de pulso worker → coordinador
+const PULSE_TIMEOUT_MS  = 8000;  // Timeout de pulso de worker (también en /servers)
+const PULSE_RETRIES     = 3;     // Fallos de pulso antes de marcar worker offline
+const TASK_TIMEOUT_MS   = 30000; // Timeout de tarea: 30 s sin resultado → "timeout"
+
 // Identidad y Estado de Coordinador
-const NODE_ID = process.argv[2] || "A";
-const PORT = Number(process.argv[3]) || 3000;
-const SEED_URL = process.argv[4] || null;
-const MY_URL = (PORT === 3000 && process.env.PUBLIC_URL)
-  ? process.env.PUBLIC_URL
-  : (process.env[`PUBLIC_URL_${NODE_ID}`] || (process.argv[3] ? `http://localhost:${PORT}` : (process.env.PUBLIC_URL || `http://localhost:${PORT}`)));
+// Soporte directo: node server.js {ID_LETRA} {PUERTO} {URL_NGROK/SEED}
+// Ejemplo solicitado: node server.js J 3000
+let NODE_ID, PORT, SEED_URL, MY_URL;
+if (process.argv[2] !== undefined && !isNaN(Number(process.argv[2])) && process.argv[2].trim() !== '') {
+  // Modo numérico: node server.js {PUERTO} {URL_NGROK}
+  PORT     = Number(process.argv[2]);
+  MY_URL   = process.argv[3] || (process.env.PUBLIC_URL || `http://localhost:${PORT}`);
+  NODE_ID  = (process.env.COORDINATOR_ID || (PORT >= 3000 && PORT <= 3025 ? String.fromCharCode(65 + (PORT - 3000)) : `coordinator-${PORT}`)).toUpperCase();
+  SEED_URL = null;
+} else {
+  // Modo con letra (formato principal: node server.js J 3000)
+  NODE_ID  = process.argv[2] ? String(process.argv[2]).trim().toUpperCase() : "A";
+  PORT     = Number(process.argv[3]) || 3000;
+
+  const defaultUrl = (PORT === 3000 && process.env.PUBLIC_URL)
+    ? process.env.PUBLIC_URL
+    : (process.env[`PUBLIC_URL_${NODE_ID}`] || process.env.PUBLIC_URL || `http://localhost:${PORT}`);
+
+  if (process.argv[4]) {
+    const arg4 = process.argv[4].trim();
+    if (process.argv[5]) {
+      MY_URL   = arg4;
+      SEED_URL = process.argv[5].trim();
+    } else if (arg4.includes("ngrok") || arg4.includes("loca.lt")) {
+      MY_URL   = arg4;
+      SEED_URL = null;
+    } else {
+      MY_URL   = defaultUrl;
+      SEED_URL = arg4;
+    }
+  } else {
+    MY_URL   = defaultUrl;
+    SEED_URL = null;
+  }
+}
 
 // Variables de estado del nodo
 let role = "follower"; // "leader" | "candidate" | "follower"
@@ -70,7 +110,7 @@ function logCoord(message) {
 }
 
 // Puertos locales estándar para auto-descubrimiento en localhost
-const LOCAL_DISCOVERY_PORTS = [3000, 3001, 3002, 3003];
+const LOCAL_DISCOVERY_PORTS = [3000, 3001, 3002, 3003, 3004, 3005];
 
 // Sondeo activo de puertos locales (solo agrega a peers los que responden online)
 async function probeLocalPeers() {
@@ -92,7 +132,8 @@ async function probeLocalPeers() {
 
       if (resp.data && resp.data.ok) {
         deadPeers.delete(targetUrl);
-        const senderId = resp.data.from?.id || String.fromCharCode(65 + (p - 3000));
+        // C3: No generar ID de letra falso para peers sin ID; null es seguro con isHigherPriority
+        const senderId = resp.data.from?.id || null;
         peers[targetUrl] = {
           id: senderId,
           url: targetUrl,
@@ -131,15 +172,22 @@ if (SEED_URL && SEED_URL !== MY_URL) {
   }
 }
 
+// Variable para rastrear la URL del líder actual conocido
+let currentLeaderUrl = null;
+
 // Obtener la dirección URL del líder actual
 function getLeaderUrl() {
   if (!currentLeader) return null;
   if (currentLeader === NODE_ID) return MY_URL;
-  const peer = Object.values(peers).find((p) => p.id === currentLeader);
+  const peer = Object.values(peers).find(
+    (p) => p.id && String(p.id).toUpperCase() === String(currentLeader).toUpperCase()
+  );
   if (peer && peer.url) return peer.url;
-  const charCode = String(currentLeader).toUpperCase().charCodeAt(0);
-  if (charCode >= 65 && charCode <= 90) {
-    const portGuess = 3000 + (charCode - 65);
+  if (currentLeaderUrl) return currentLeaderUrl;
+  // Fallback si el ID coincide con A-D mapeado a puertos locales estándar
+  const leaderId = String(currentLeader).toUpperCase();
+  if (/^[A-D]$/.test(leaderId)) {
+    const portGuess = 3000 + (leaderId.charCodeAt(0) - 65);
     return `http://localhost:${portGuess}`;
   }
   return null;
@@ -182,6 +230,13 @@ let serverProcesses = {};
 let messagesByServer = {};
 let allMessages = [];
 let heartbeatHistory = [];
+
+// ==========================================================================
+// ALMACENAMIENTO DE TAREAS (sección 4.4 AGENTS.md — código nuevo)
+// ==========================================================================
+// Estructura: { [taskId]: { taskId, type, payload, worker, status, createdAt, assignedAt, completedAt, result, error } }
+// status ∈ "assigned" | "ok" | "error" | "timeout"
+let tasks = {};
 
 // Helper para registrar mensajes en la lista global
 function recordMessage({ sender, message, target = null, type = "received" }) {
@@ -230,6 +285,7 @@ app.post("/register", onlyLeader, (req, res) => {
     lastHeartbeat: Date.now(),
     heartbeatCount: (servers[name]?.heartbeatCount || 0) + 1,
     status: "active",
+    capabilities: req.body.capabilities || servers[name]?.capabilities || [],  // C6
   };
 
   let clientIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket?.remoteAddress || "127.0.0.1";
@@ -367,7 +423,8 @@ app.post("/unregister/:name", handleDisconnect);
 // Obtener Servidores activos (compatible con frontend y scripts)
 app.get("/servers", (req, res) => {
   const now = Date.now();
-  const TIMEOUT_MS = 10000;
+  // C4: PULSE_RETRIES × PULSE_INTERVAL_MS = 9 s (reemplaza los 10 s anteriores)
+  const TIMEOUT_MS = PULSE_RETRIES * PULSE_INTERVAL_MS;
   const serverList = Object.values(servers).map((s) => {
     const elapsed = Math.floor((now - s.lastHeartbeat) / 1000);
     const isOnline = s.status === "active" && (now - s.lastHeartbeat) <= TIMEOUT_MS;
@@ -509,6 +566,7 @@ app.get("/api/stats", (req, res) => {
       elapsedSeconds: Math.floor((now - s.lastHeartbeat) / 1000),
       isOnline: s.status === "active" && now - s.lastHeartbeat <= 15000,
       heartbeatCount: s.heartbeatCount || 1,
+      capabilities: s.capabilities || [],  // C7
     })),
   });
 });
@@ -531,6 +589,126 @@ app.post("/api/send-custom", (req, res) => {
 });
 
 // ==========================================================================
+// ENDPOINTS DE TAREAS (sección 4.4 AGENTS.md — código nuevo)
+// ==========================================================================
+
+// POST /task/receive — el worker entrega el resultado de una tarea al líder
+app.post('/task/receive', onlyLeader, (req, res) => {
+  const { type, data } = req.body || {};
+  if (type !== 'task-result' || !data || !data.taskId) {
+    return res.status(400).json({ ok: false, error: 'Payload inválido: se requiere type="task-result" y data.taskId' });
+  }
+  const { taskId, status, result, error } = data;
+  let task = tasks[taskId];
+  if (!task) {
+    task = {
+      taskId,
+      type: 'external',
+      payload: null,
+      worker: req.body?.worker || 'worker',
+      status: status === 'ok' ? 'ok' : 'error',
+      createdAt: Date.now(),
+      assignedAt: Date.now(),
+      completedAt: Date.now(),
+      result: result || null,
+      error: error || null,
+    };
+    tasks[taskId] = task;
+  } else {
+    task.status      = status === 'ok' ? 'ok' : 'error';
+    task.result      = result || null;
+    task.error       = error || null;
+    task.completedAt = Date.now();
+  }
+  logCoord(`Resultado recibido: tarea ${taskId} → ${task.status}`);
+  recordMessage({
+    sender: task.worker || 'worker',
+    message: `Tarea ${taskId} completada con estado: ${task.status}`,
+    target: NODE_ID,
+    type: 'system_event',
+  });
+  res.json({ ok: true, message: 'Resultado recibido', taskId });
+});
+
+// POST /api/tasks — la UI crea y despacha una tarea (solo líder)
+app.post('/api/tasks', onlyLeader, async (req, res) => {
+  const { type: taskType, payload, worker: preferredWorker } = req.body || {};
+  if (!taskType || !payload) {
+    return res.status(400).json({ ok: false, error: 'Se requieren los campos type y payload' });
+  }
+
+  const now = Date.now();
+  const TIMEOUT_MS = PULSE_RETRIES * PULSE_INTERVAL_MS;
+
+  // Determinar workers online con la capacidad requerida
+  const candidates = Object.values(servers).filter((s) => {
+    const isOnline = s.status === 'active' && (now - s.lastHeartbeat) <= TIMEOUT_MS;
+    const hasCap   = Array.isArray(s.capabilities) && s.capabilities.includes(taskType);
+    return isOnline && hasCap;
+  });
+
+  // Selección de worker
+  let targetWorker;
+  if (preferredWorker) {
+    targetWorker = candidates.find((s) => s.name === preferredWorker);
+    if (!targetWorker) {
+      return res.status(400).json({ ok: false, error: `Worker '${preferredWorker}' no está online o no tiene la capacidad '${taskType}'` });
+    }
+  } else {
+    if (candidates.length === 0) {
+      return res.status(422).json({ ok: false, error: `Ningún worker online con la capacidad requerida: ${taskType}` });
+    }
+    // Elegir el worker con menos tareas 'assigned' (desempate: orden de registro)
+    candidates.sort((a, b) => {
+      const aAssigned = Object.values(tasks).filter((t) => t.worker === a.name && t.status === 'assigned').length;
+      const bAssigned = Object.values(tasks).filter((t) => t.worker === b.name && t.status === 'assigned').length;
+      if (aAssigned !== bAssigned) return aAssigned - bAssigned;
+      return (a.registeredAt || 0) - (b.registeredAt || 0);
+    });
+    targetWorker = candidates[0];
+  }
+
+  // Generar taskId
+  const taskId = req.body.taskId || `task-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+
+  // Registrar tarea en memoria
+  tasks[taskId] = {
+    taskId,
+    type: taskType,
+    payload,
+    worker: targetWorker.name,
+    status: 'assigned',
+    createdAt: Date.now(),
+    assignedAt: Date.now(),
+    completedAt: null,
+    result: null,
+    error: null,
+  };
+
+  // Asignar al worker
+  try {
+    await axios.post(`${targetWorker.url}/task/assign`, {
+      type: 'task-assign',
+      data: { taskId, type: taskType, payload },
+    }, { timeout: PULSE_TIMEOUT_MS, headers: { 'ngrok-skip-browser-warning': 'true' } });
+    logCoord(`Tarea ${taskId} (${taskType}) asignada a ${targetWorker.name}`);
+    res.json({ ok: true, taskId, worker: targetWorker.name });
+  } catch (err) {
+    tasks[taskId].status = 'error';
+    tasks[taskId].error  = `Error al contactar al worker: ${err.message}`;
+    tasks[taskId].completedAt = Date.now();
+    logCoord(`Error asignando tarea ${taskId} a ${targetWorker.name}: ${err.message}`);
+    res.status(502).json({ ok: false, error: `No se pudo contactar al worker: ${err.message}`, taskId });
+  }
+});
+
+// GET /api/tasks — listar todas las tareas (más recientes primero)
+app.get('/api/tasks', (req, res) => {
+  const taskList = Object.values(tasks).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  res.json({ total: taskList.length, tasks: taskList });
+});
+
+// ==========================================================================
 // PROTOCOLO DE DESCUBRIMIENTO DE COORDINADORES Y ELECCIÓN (BULLY)
 // ==========================================================================
 
@@ -543,13 +721,16 @@ function isHigherPriority(id1, id2) {
   if (!isNaN(num1) && !isNaN(num2)) {
     return num1 > num2;
   }
-  return String(id1).localeCompare(String(id2)) > 0;
+  // Comparación determinista insensible a mayúsculas
+  const s1 = String(id1).toUpperCase();
+  const s2 = String(id2).toUpperCase();
+  return s1 > s2;
 }
 
 // Determinar si una URL pertenece al líder actual
 function isPeerLeader(peerUrl) {
   if (!currentLeader) return false;
-  if (peers[peerUrl]?.id === currentLeader) return true;
+  if (peers[peerUrl]?.id && String(peers[peerUrl].id).toUpperCase() === String(currentLeader).toUpperCase()) return true;
   return false;
 }
 
@@ -567,6 +748,20 @@ function setLeader(newLeader, term, algo = "bully", options = {}) {
   }
   role = currentLeader === NODE_ID ? "leader" : "follower";
   electionInProgress = false;
+
+  // Actualizar la URL del líder
+  if (newLeader === NODE_ID) {
+    currentLeaderUrl = MY_URL;
+  } else if (options.url || options.leaderUrl) {
+    currentLeaderUrl = options.url || options.leaderUrl;
+  } else {
+    const peer = Object.values(peers).find(
+      (p) => p.id && String(p.id).toUpperCase() === String(newLeader).toUpperCase()
+    );
+    if (peer && peer.url) {
+      currentLeaderUrl = peer.url;
+    }
+  }
 
   // Solo mostrar en consola:
   // 1. Si este nodo es quien se proclama líder (newLeader === NODE_ID)
@@ -1190,8 +1385,7 @@ async function checkInitialLeader() {
 }
 
 // Rutina periódica de intercambio de pings entre coordinadores
-const PING_INTERVAL_MS = 2500;
-
+// C4: PING_INTERVAL_MS definido como constante al inicio del archivo (valor 2000)
 async function sendPeerPings() {
   const peerUrls = Object.keys(peers);
 
@@ -1203,7 +1397,7 @@ async function sendPeerPings() {
   for (const peerUrl of peerUrls) {
     try {
       const response = await axios.post(`${peerUrl}/election/ping`, payload, {
-        timeout: 1500,
+        timeout: PING_TIMEOUT_MS,  // C4: actualizado de 1500 a PING_TIMEOUT_MS (5000)
       });
 
       if (peers[peerUrl]) {
@@ -1290,8 +1484,8 @@ async function sendPeerPings() {
         peers[peerUrl].failCount = (peers[peerUrl].failCount || 0) + 1;
         const elapsed = Date.now() - (peers[peerUrl].lastSeen || 0);
 
-        // Si falla 2 veces consecutivas o pasan más de 4s, eliminar de la lista de peers
-        if (peers[peerUrl].failCount >= 2 || elapsed > 4000) {
+        // C5: Eliminar peer solo tras PING_RETRIES fallos consecutivos (sin atajo de tiempo)
+        if (peers[peerUrl].failCount >= PING_RETRIES) {
           const wasLeader = currentLeader && isPeerLeader(peerUrl);
           logCoord(`Coordinador ${peerUrl} apagado/caído. Eliminado de la lista de peers.`);
           delete peers[peerUrl];
@@ -1321,7 +1515,8 @@ setInterval(() => {
 
   const leaderPeer = Object.values(peers).find((p) => p.id === currentLeader);
   if (leaderPeer && (leaderPeer.lastSeen || 0) > 0) {
-    if (Date.now() - leaderPeer.lastSeen > 5000) {
+    // C4: Umbral coherente con PING_RETRIES × PING_INTERVAL_MS + margen (= 8 s)
+    if (Date.now() - leaderPeer.lastSeen > PING_RETRIES * PING_INTERVAL_MS + 2000) {
       logCoord("Lider caído detectado. Iniciando eleccion Bully...");
       delete peers[leaderPeer.url];
       deadPeers.set(leaderPeer.url, Date.now());
@@ -1334,7 +1529,8 @@ setInterval(() => {
 // Timeout check periódico de servidores
 setInterval(() => {
   const now = Date.now();
-  const timeout = 10000;
+  // C4: PULSE_RETRIES × PULSE_INTERVAL_MS = 9 s (reemplaza los 10 s anteriores)
+  const timeout = PULSE_RETRIES * PULSE_INTERVAL_MS;
 
   Object.keys(servers).forEach((name) => {
     if (now - servers[name].lastHeartbeat > timeout) {
@@ -1344,9 +1540,19 @@ setInterval(() => {
 
         recordMessage({
           sender: "Sistema",
-          message: `Servidor [${name}] desconectado por inactividad (>10s sin pulso)`,
+          message: `Servidor [${name}] desconectado por inactividad (>9s sin pulso)`,
           target: name,
           type: "system_alert",
+        });
+
+        // Marcar tareas 'assigned' de este worker como 'error' (sección 4.4)
+        Object.values(tasks).forEach((t) => {
+          if (t.worker === name && t.status === 'assigned') {
+            t.status = 'error';
+            t.error  = `Worker ${name} se desconectó antes de completar la tarea`;
+            t.completedAt = Date.now();
+            logCoord(`Tarea ${t.taskId} marcada como error por caída de ${name}`);
+          }
         });
       }
 
@@ -1360,6 +1566,18 @@ setInterval(() => {
     }
   });
 }, 2500);
+
+// Timeout periódico de tareas: marcar como 'timeout' si superan TASK_TIMEOUT_MS sin resultado
+setInterval(() => {
+  const now = Date.now();
+  Object.values(tasks).forEach((t) => {
+    if (t.status === 'assigned' && (now - (t.assignedAt || t.createdAt)) > TASK_TIMEOUT_MS) {
+      t.status = 'timeout';
+      t.completedAt = now;
+      logCoord(`Tarea ${t.taskId} expirada por timeout (>${TASK_TIMEOUT_MS / 1000} s)`);
+    }
+  });
+}, 5000);
 
 // Limpieza explícita al apagar el proceso (Ctrl+C / Kill)
 process.on("SIGINT", () => {
