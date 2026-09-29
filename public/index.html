@@ -647,9 +647,34 @@
           if (Array.isArray(data.peers)) {
             data.peers.forEach(peer => {
               const peerUrl = typeof peer === "string" ? peer : peer?.url;
-              if (peerUrl && !knownCoordinators.has(peerUrl)) {
-                knownCoordinators.add(peerUrl);
-                addLog("DISCOVERY", `Nuevo coordinador descubierto en red: ${peerUrl}`);
+              const peerId = typeof peer === "object" && peer !== null ? peer.id : null;
+              if (peerUrl) {
+                if (!knownCoordinators.has(peerUrl)) {
+                  knownCoordinators.add(peerUrl);
+                  addLog("DISCOVERY", `Nuevo coordinador descubierto en red: ${peerId ? '[' + peerId + '] ' : ''}${peerUrl}`);
+                }
+                // Si el peer viene identificado por el coordinador, pre-poblar su ID
+                if (peerId) {
+                  if (!coordinatorStates[peerUrl]) {
+                    coordinatorStates[peerUrl] = {
+                      id: peerId,
+                      url: peerUrl,
+                      role: "follower",
+                      leader: data.leader || null,
+                      leaderUrl: data.leaderUrl || null,
+                      peers: [],
+                      isOnline: peer.alive !== false,
+                      latency: latency || 40,
+                      lastChecked: Date.now(),
+                      failCount: 0
+                    };
+                  } else {
+                    coordinatorStates[peerUrl].id = peerId;
+                    if (peer.alive !== false) {
+                      coordinatorStates[peerUrl].isOnline = true;
+                    }
+                  }
+                }
               }
             });
           }
@@ -676,16 +701,35 @@
           return coordinatorStates[url];
         } catch (err) {
           clearTimeout(timeoutId);
-          const wasOnline = coordinatorStates[url]?.isOnline;
-          const prevFail = coordinatorStates[url]?.failCount || 0;
+          const existing = coordinatorStates[url];
+
+          // Si el navegador no puede consultar directamente al peer remoto (ej. no implementa GET /election/state),
+          // pero nuestro coordinador backend lo reporta como vivo en sus peers:
+          const isReportedAliveByCluster = Object.values(coordinatorStates).some(c => 
+            c.isOnline && Array.isArray(c.peers) && c.peers.some(p => {
+              const pUrl = typeof p === "string" ? p : p?.url;
+              return pUrl === url && p.alive !== false;
+            })
+          );
+
+          if (isReportedAliveByCluster && existing && existing.id && existing.id !== "?") {
+            // Mantenerlo online y con su ID real (ej: D)
+            existing.isOnline = true;
+            existing.lastChecked = Date.now();
+            existing.failCount = 0;
+            return existing;
+          }
+
+          const wasOnline = existing?.isOnline;
+          const prevFail = existing?.failCount || 0;
           
           coordinatorStates[url] = {
-            id: coordinatorStates[url]?.id || "?",
+            id: existing?.id || "?",
             url: url,
             role: "unknown",
             leader: null,
             leaderUrl: null,
-            peers: coordinatorStates[url]?.peers || [],
+            peers: existing?.peers || [],
             isOnline: false,
             latency: null,
             lastChecked: Date.now(),
@@ -697,8 +741,8 @@
             addLog("DEAD", `Coordinador en ${url} dejó de responder (Timeout/Caído)`);
           }
 
-          // Si un nodo no es el origen de la app y se apagó (falla 2 veces consecutivas), retirarlo de la interfaz
-          if (url !== window.location.origin && coordinatorStates[url].failCount >= 2) {
+          // Si un nodo no es el origen de la app y se apagó (falla 3 veces consecutivas), retirarlo de la interfaz
+          if (url !== window.location.origin && coordinatorStates[url].failCount >= 3) {
             knownCoordinators.delete(url);
             delete coordinatorStates[url];
           }
@@ -818,33 +862,42 @@
       const statConsensusStatus = document.getElementById("statConsensusStatus");
 
       function renderTopology() {
-        // Agrupar y deduplicar por puerto para no duplicar localhost vs 127.0.0.1
-        const portMap = new Map();
+        // Agrupar y deduplicar por ID (ej: 'id:J') para no duplicar localhost vs ngrok
+        const dedupMap = new Map();
         Array.from(knownCoordinators).forEach(url => {
-      let portKey = url;
-          try {
-            const parsed = new URL(url);
-            // U1: Para ngrok (host no es localhost/127.0.0.1) usar parsed.host como clave
-            const host = parsed.hostname;
-            if (host === 'localhost' || host === '127.0.0.1') {
-              portKey = parsed.port || '80';
-            } else {
-              portKey = parsed.host; // URL ngrok: usar host completo
-            }
-          } catch(e) {}
-          
-          const current = portMap.get(portKey);
           const state = coordinatorStates[url];
+          let dedupKey = url;
+
+          if (state && state.id && state.id !== "?" && state.id !== "N/A") {
+            dedupKey = `id:${state.id.toUpperCase()}`;
+          } else {
+            try {
+              const parsed = new URL(url);
+              const host = parsed.hostname;
+              if (host === 'localhost' || host === '127.0.0.1') {
+                dedupKey = `port:${parsed.port || '80'}`;
+              } else {
+                dedupKey = `host:${parsed.host}`;
+              }
+            } catch(e) {}
+          }
+          
+          const current = dedupMap.get(dedupKey);
           
           if (!current) {
-            portMap.set(portKey, url);
-          } else if (state && state.isOnline) {
-            // Preferir la URL que responda online
-            portMap.set(portKey, url);
+            dedupMap.set(dedupKey, url);
+          } else {
+            const currentState = coordinatorStates[current];
+            if ((!currentState || !currentState.isOnline) && state && state.isOnline) {
+              dedupMap.set(dedupKey, url);
+            } else if (url.includes("ngrok") && state && state.isOnline) {
+              // Preferir la URL ngrok pública sobre localhost para consistencia de red
+              dedupMap.set(dedupKey, url);
+            }
           }
         });
 
-        const distinctUrls = Array.from(portMap.values()).sort();
+        const distinctUrls = Array.from(dedupMap.values()).sort();
         const total = distinctUrls.length;
         let aliveCount = 0;
 
