@@ -35,13 +35,19 @@ Estado clave del worker: `NAME`, `PORT`, `MY_WORKER_URL`, `currentCoordinatorUrl
 
 ## 2. Identidad y arranque
 
-- IDs obligatorios:
-  - Worker: `worker-{nombre}-{código}` → ej. `worker-juan-55217003`
-  - Coordinador: **se mantiene el esquema actual**, un ID de una letra (`A`, `B`, `C`, `D`, ...) definido por convención entre compañeros al momento de arrancar cada nodo. No se usa `coordinator-{nombre}-{código}` para el arranque ni para `NODE_ID`.
-- **Coordinador:** arranque sin cambios respecto al código actual: `node index.js {ID_LETRA} {PUERTO} {SEED_URL}` → ej. `node index.js A 3000` o `node index.js C 3002 http://localhost:3000`. `NODE_ID` sigue tomándose de `process.argv[2]` y `MY_URL` sigue resolviéndose como hoy (con `PUBLIC_URL`/`PUBLIC_URL_{ID}` si se usa ngrok). **No aplica el comando único `node index.js {PUERTO} {URL_NGROK}` al coordinador.**
-- **Worker:** sí usa el comando único: `node index.js {PUERTO} {URL_NGROK}`
-  - Ej.: `node index.js 4000 https://nombre-random.ngrok.dev`
-  - El nombre del worker (`NAME`) se lee de `.env` (`WORKER_ID`), no de la consola.
+- **IDs obligatorios (actualizado a solicitud del docente):**
+  - Worker: `worker-{nombre}-{código}` → ej. `worker-jose-55217003` o `worker-juandiego-55217003`
+  - Coordinador: `coordinator-{nombre}-{código}` → ej. `coordinator-jose-55217003` o `coordinator-juandiego-55217003`
+- **Comando único de consola para ambos componentes:**
+  - Coordinador: `node server.js {PUERTO} {URL_NGROK}`
+    - Ej.: `node server.js 3000 https://nombre-ngrok.dev` (o `node server.js 3000` en local)
+  - Worker: `node worker.js {PUERTO} {URL_NGROK}`
+    - Ej.: `node worker.js 4000 https://nombre-ngrok.dev` (o `node worker.js 4000` en local)
+- **Asignación y cambio de ID desde la UI:**
+  - Dado que la consola solo recibe `{PUERTO} {URL_NGROK}`, los ID se asignan y modifican en caliente desde la interfaz web (UI):
+    - En el Coordinador: Barra de configuración de identidad y endpoints `POST /coordinator/id`, `GET /coordinator/id`.
+    - En el Worker: Tarjeta de identidad del worker y endpoints `POST /worker/id`, `GET /worker/id`.
+  - El algoritmo Bully evalúa deterministamente `isHigherPriority(id1, id2)` comparando los IDs de coordinadores, y si un nodo cambia su ID a uno superior mediante la UI, desafía inmediatamente el liderazgo actual.
 
 ---
 

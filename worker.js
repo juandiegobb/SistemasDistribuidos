@@ -47,22 +47,35 @@ const PULSE_INTERVAL_MS = 3000;  // Intervalo de pulso worker → coordinador
 const PULSE_TIMEOUT_MS = 8000;  // Timeout de pulso (y de llamadas a tareas)
 const PULSE_RETRIES = 3;     // Fallos consecutivos antes de buscar nuevo líder
 
-// W1: Parseo de argumentos flexible (local y túneles ngrok)
+// Identidad y Estado de Worker
+// Formato solicitado por docente: node worker.js {PUERTO} {URL_NGROK}
+// Formato de IDs: worker-{nombre}-{código} (ej: worker-jose-55217003)
 let PORT, NAME, MY_WORKER_URL, currentCoordinatorUrl;
+
+function defaultWorkerId(port) {
+  if (process.env.WORKER_ID) return process.env.WORKER_ID.trim();
+  if (process.env.WORKER_NAME && process.env.WORKER_CODE) {
+    return `worker-${process.env.WORKER_NAME.toLowerCase().trim()}-${process.env.WORKER_CODE.trim()}`;
+  }
+  return `worker-node-${port}`;
+}
 
 PORT = Number(process.argv[2]) || 4000;
 
 if (process.argv[3] !== undefined && String(process.argv[3]).startsWith('http')) {
-  // Modo: node miniServer.js {PUERTO} {URL_WORKER_NGROK} [URL_COORD]
+  // Comando único solicitado por docente: node worker.js {PUERTO} {URL_WORKER_NGROK} [URL_COORD]
   MY_WORKER_URL = process.argv[3];
-  NAME = process.env.WORKER_ID || `worker-${PORT}`;
+  NAME = defaultWorkerId(PORT);
   currentCoordinatorUrl = process.argv[4] || process.env.PUBLIC_URL || 'http://localhost:3000';
+} else if (process.argv[2] !== undefined && !isNaN(Number(process.argv[2])) && !process.argv[3]) {
+  // Solo puerto en localhost: node worker.js 4000
+  MY_WORKER_URL = process.env.WORKER_URL || `http://localhost:${PORT}`;
+  NAME = defaultWorkerId(PORT);
+  currentCoordinatorUrl = process.env.COORDINATOR_URL || 'http://localhost:3000';
 } else {
-  // Modo: node miniServer.js {PUERTO} {NOMBRE} [URL_WORKER_NGROK] [URL_COORD]
-  NAME = process.argv[3] || process.env.WORKER_ID || `worker-${PORT}`;
-
+  // Modo de compatibilidad
+  NAME = process.argv[3] || defaultWorkerId(PORT);
   if (process.argv[5]) {
-    // 4 parámetros pasados: node miniServer.js 4000 worker-juan https://worker.ngrok.dev https://coord.ngrok.dev
     MY_WORKER_URL = process.argv[4];
     currentCoordinatorUrl = process.argv[5];
   } else if (process.argv[4]) {
@@ -103,7 +116,9 @@ let pulseInterval = null;
 // ==========================================================================
 // CAPACIDADES ASIGNADAS AL GRUPO G8 (Parcial de Sistemas Distribuidos)
 // 5. vector_distance (Juan Diego): distancia euclidiana 2D
+// 5. vector_distance (Juan Diego): distancia euclidiana 2D
 // 6. http_latency (Paula Selene): latencia HTTP en ms
+// 7. text_stats (Propuesta equipo G8): estadísticas de texto
 // ==========================================================================
 
 function resolveCapabilities() {
@@ -113,18 +128,30 @@ function resolveCapabilities() {
   if (process.env.CAPABILITIES) {
     return process.env.CAPABILITIES.split(',').map(c => c.trim()).filter(Boolean);
   }
-  const name = String(NAME || '').toLowerCase();
-  const workerUrl = String(MY_WORKER_URL || '').toLowerCase();
-
-  // Paula (Capacidad 6: http_latency)
-  if (name.includes('paula') || name.includes('selene') || workerUrl.includes('yodel-posting-resubmit')) {
-    return ['http_latency'];
-  }
-  // Juan Diego (Capacidad 5: vector_distance)
-  return ['vector_distance'];
+  // Por defecto, el worker del equipo G8 implementa sus 2 capacidades asignadas (5 y 6) y la 3ª propuesta
+  return ['vector_distance', 'http_latency', 'text_stats'];
 }
 
-const CAPABILITIES = resolveCapabilities();
+let CAPABILITIES = resolveCapabilities();
+
+// Schemas y ejemplos de payload para auto-descubrimiento en /task/capabilities
+const TASK_SCHEMAS = {
+  vector_distance: {
+    description: "Distancia euclidiana entre 2 vectores 2D",
+    payload: { a: [0, 0], b: [3, 4] },
+    expectedResult: { distance: 5 },
+  },
+  http_latency: {
+    description: "Medición de latencia HTTP en ms vía GET",
+    payload: { url: "https://www.google.com" },
+    expectedResult: { ms: 42 },
+  },
+  text_stats: {
+    description: "Estadísticas de texto (longitud, palabras, vocales)",
+    payload: { text: "Sistemas Distribuidos Parcial 2026" },
+    expectedResult: { length: 34, words: 4, vowels: 12 },
+  },
+};
 
 // Lag configurable en milisegundos (modificable en caliente con POST /task/config)
 let TASK_DELAY_MS = Number(process.env.TASK_DELAY_MS) || 3000;
@@ -162,6 +189,23 @@ async function executeHttpLatency(payload) {
     throw new Error(`Error de red/timeout al medir ${url}: ${e.message}`);
   }
   return { ms: Math.round(require('perf_hooks').performance.now() - start) };
+}
+
+// 3. text_stats (Propuesta del grupo G8): análisis estadístico de texto
+// Payload: { "text": "..." } -> Resultado: { "length": ..., "words": ..., "vowels": ... }
+function executeTextStats(payload) {
+  const { text } = payload || {};
+  if (typeof text !== 'string') {
+    throw new Error('Payload inválido: text debe ser una cadena de texto');
+  }
+  const clean = text.trim();
+  const words = clean ? clean.split(/\s+/).filter(Boolean).length : 0;
+  const vowels = (text.match(/[aeiouáéíóúü]/gi) || []).length;
+  return {
+    length: text.length,
+    words,
+    vowels,
+  };
 }
 
 // Enviar resultado de tarea al coordinador líder
@@ -247,6 +291,7 @@ async function registerWithLeader(coordUrl) {
       name: NAME,
       url: MY_WORKER_URL,
       capabilities: CAPABILITIES,  // W2: publicar capacidades al registrarse
+      schemas: TASK_SCHEMAS,       // Esquemas de payload esperados
     });
     if (res.status === 200) {
       currentCoordinatorUrl = coordUrl;
@@ -478,9 +523,9 @@ app.put("/config", updateParentUrl);
 // ENDPOINTS DE TAREAS (sección 4 AGENTS.md — código nuevo)
 // ==========================================================================
 
-// GET /task/capabilities — devuelve capacidades del worker
+// GET /task/capabilities — devuelve capacidades del worker y sus esquemas
 app.get('/task/capabilities', (req, res) => {
-  res.json({ worker: NAME, capabilities: CAPABILITIES });
+  res.json({ worker: NAME, capabilities: CAPABILITIES, schemas: TASK_SCHEMAS });
 });
 
 // POST /task/config — cambiar el lag en caliente
@@ -492,6 +537,64 @@ app.post('/task/config', (req, res) => {
   TASK_DELAY_MS = delayMs;
   logActivity(`Lag de tarea actualizado a ${TASK_DELAY_MS} ms`);
   res.json({ ok: true, taskDelayMs: TASK_DELAY_MS });
+});
+
+// POST /worker/id y /worker/config — cambiar el ID del worker desde la UI en caliente
+app.all(['/worker/id', '/worker/config/id'], async (req, res) => {
+  if (req.method === 'GET') {
+    return res.json({
+      ok: true,
+      name: NAME,
+      worker: NAME,
+      capabilities: CAPABILITIES,
+      taskDelayMs: TASK_DELAY_MS,
+      url: MY_WORKER_URL,
+      port: PORT,
+      currentCoordinatorUrl,
+    });
+  }
+
+  const { id, name, code, nombre, codigo } = req.body || {};
+  let newName = id;
+  const n = name || nombre;
+  const c = code || codigo;
+
+  if (!newName && n && c) {
+    newName = `worker-${String(n).toLowerCase().trim()}-${String(c).trim()}`;
+  } else if (!newName && n) {
+    newName = String(n).trim();
+  }
+
+  if (!newName || typeof newName !== 'string' || !newName.trim()) {
+    return res.status(400).json({ ok: false, error: 'ID de worker inválido. Formato requerido: worker-{nombre}-{código}' });
+  }
+
+  newName = newName.trim();
+  const oldName = NAME;
+  NAME = newName;
+  CAPABILITIES = resolveCapabilities();
+
+  logActivity(`Identidad del worker actualizada: [${oldName}] ➔ [${NAME}]`);
+
+  // Notificar al coordinador líder re-registrándose de inmediato
+  if (currentCoordinatorUrl) {
+    try {
+      await registerWithLeader(currentCoordinatorUrl);
+      logActivity(`Re-registro exitoso con nuevo ID [${NAME}] en el líder ${currentCoordinatorUrl}`);
+    } catch (err) {
+      logActivity(`Advertencia: no se pudo re-registrar de inmediato con el coordinador: ${err.message}`);
+    }
+  }
+
+  res.json({
+    ok: true,
+    oldName,
+    name: NAME,
+    worker: NAME,
+    capabilities: CAPABILITIES,
+    taskDelayMs: TASK_DELAY_MS,
+    message: `ID de worker actualizado a [${NAME}]`,
+  });
 });
 
 // POST /task/assign — el coordinador asigna una tarea a este worker
@@ -534,8 +637,10 @@ app.post('/task/assign', async (req, res) => {
       result = executeVectorDistance(payload);
     } else if (taskType === 'http_latency') {
       result = await executeHttpLatency(payload);
+    } else if (taskType === 'text_stats') {
+      result = executeTextStats(payload);
     } else {
-      throw new Error(`Capacidad no soportada por el grupo G8: ${taskType}`);
+      throw new Error(`Capacidad no soportada: ${taskType}`);
     }
 
     const elapsed = Date.now() - execStart;
@@ -947,6 +1052,41 @@ app.get("/", (req, res) => {
       </div>
     </div>
 
+    <!-- CONFIGURACIÓN DE IDENTIDAD (ID DEL WORKER) -->
+    <div class="card" style="border: 1px solid rgba(56, 189, 248, 0.45); background: rgba(56, 189, 248, 0.05); box-shadow: 0 4px 20px rgba(56, 189, 248, 0.1);">
+      <div class="card-title" style="color: #38bdf8; display: flex; align-items: center; justify-content: space-between;">
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          IDENTIDAD DEL WORKER (ID)
+        </span>
+        <span style="font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; padding: 2px 8px; font-weight: 700;">1-CLIC PRESETS</span>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted); margin: 6px 0 10px 0;">
+        Elige un preset rápido o escribe tu nombre y código (formato: <code style="color: #38bdf8; font-family: monospace;">worker-{nombre}-{código}</code>):
+      </p>
+      <!-- Botones de 1 Clic Rápido -->
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
+        <button type="button" onclick="applyWorkerPreset('juandiego', '55223042')" class="btn" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 6px 14px; font-size: 12px;">⚡ Juan Diego (55223042)</button>
+        <button type="button" onclick="applyWorkerPreset('paula', '55223021')" class="btn" style="background: rgba(14, 165, 233, 0.2); color: #7dd3fc; border: 1px solid rgba(14, 165, 233, 0.4); padding: 6px 14px; font-size: 12px;">⚡ Paula (55223021)</button>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Nombre:</span>
+          <input type="text" id="workerNameInput" class="lag-input" placeholder="ej. juandiego" style="width: 140px;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Código:</span>
+          <input type="text" id="workerCodeInput" class="lag-input" placeholder="ej. 55223042" style="width: 140px;">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 220px;">
+          <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">ID Resultante:</span>
+          <input type="text" id="workerFullIdInput" class="msg-input" style="padding: 8px 12px; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #38bdf8;" value="${NAME}">
+        </div>
+        <button type="button" class="btn" id="saveWorkerIdBtn" style="padding: 9px 20px; font-size: 13px;">Asignar ID</button>
+      </div>
+      <div id="workerIdFeedback" style="font-size: 12px; margin-top: 8px; display: none;"></div>
+    </div>
+
     <!-- COORDINADORES QUE CONOZCO -->
     <div class="card">
       <div class="card-title">
@@ -1116,6 +1256,80 @@ app.get("/", (req, res) => {
 
     setInterval(updateState, 1200);
     updateState();
+
+    // Inicializar inputs de nombre y código del worker si coincide con worker-{nombre}-{código}
+    try {
+      var initialWorkerName = "${NAME}";
+      var match = initialWorkerName.match(/^worker-([a-zA-Z0-9]+)-([a-zA-Z0-9]+)$/i);
+      if (match) {
+        document.getElementById('workerNameInput').value = match[1];
+        document.getElementById('workerCodeInput').value = match[2];
+      }
+    } catch (e) {}
+
+    function updateWorkerIdPreview() {
+      var n = document.getElementById('workerNameInput').value.trim();
+      var c = document.getElementById('workerCodeInput').value.trim();
+      if (n && c) {
+        document.getElementById('workerFullIdInput').value = 'worker-' + n.toLowerCase() + '-' + c;
+      }
+    }
+    document.getElementById('workerNameInput').addEventListener('input', updateWorkerIdPreview);
+    document.getElementById('workerCodeInput').addEventListener('input', updateWorkerIdPreview);
+
+    window.applyWorkerPreset = function(nombre, codigo) {
+      document.getElementById('workerNameInput').value = nombre;
+      document.getElementById('workerCodeInput').value = codigo;
+      document.getElementById('workerFullIdInput').value = 'worker-' + nombre.toLowerCase() + '-' + codigo;
+      document.getElementById('saveWorkerIdBtn').click();
+    };
+
+    ['workerNameInput', 'workerCodeInput'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            document.getElementById('saveWorkerIdBtn').click();
+          }
+        });
+      }
+    });
+
+    document.getElementById('saveWorkerIdBtn').addEventListener('click', async () => {
+      var targetId = document.getElementById('workerFullIdInput').value.trim();
+      var feedback = document.getElementById('workerIdFeedback');
+      if (!targetId) {
+        alert('Ingresa un ID válido');
+        return;
+      }
+      try {
+        var res = await fetch('/worker/id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: targetId })
+        });
+        var data = await res.json();
+        if (res.ok) {
+          feedback.style.display = 'block';
+          feedback.style.color = '#34d399';
+          feedback.textContent = '✓ ID actualizado a [' + data.name + ']. Registrado con el coordinador.';
+          document.querySelector('.worker-info h1').innerHTML = '<span class="status-dot" id="statusDot"></span> ' + data.name;
+          if (Array.isArray(data.capabilities)) {
+            document.getElementById('capList').innerHTML = data.capabilities.map(function(c) {
+              return '<span class="cap-badge">' + c + '</span>';
+            }).join('');
+          }
+          setTimeout(function() { feedback.style.display = 'none'; }, 4000);
+          updateState();
+        } else {
+          feedback.style.display = 'block';
+          feedback.style.color = '#f87171';
+          feedback.textContent = '✗ Error: ' + (data.error || 'No se pudo actualizar');
+        }
+      } catch (err) {
+        alert('Error de conexión al actualizar ID');
+      }
+    });
 
     // Enviar Mensaje
     document.getElementById('msgForm').addEventListener('submit', async (e) => {

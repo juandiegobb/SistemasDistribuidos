@@ -59,18 +59,43 @@ const PULSE_RETRIES = 3;     // Fallos de pulso antes de marcar worker offline
 const TASK_TIMEOUT_MS = 30000; // Timeout de tarea: 30 s sin resultado → "timeout"
 
 // Identidad y Estado de Coordinador
-// Soporte directo: node server.js {ID_LETRA} {PUERTO} {URL_NGROK/SEED}
-// Ejemplo solicitado: node server.js J 3000
+// Formato solicitado por docente: node server.js {PUERTO} {URL_NGROK}
+// Formato de IDs: coordinator-{nombre}-{código} (ej: coordinator-jose-55217003)
 let NODE_ID, PORT, SEED_URL, MY_URL;
+let identityConfigured = false;
+
+function defaultCoordinatorId(port) {
+  if (process.env.COORDINATOR_ID) {
+    identityConfigured = true;
+    return process.env.COORDINATOR_ID.trim();
+  }
+  if (process.env.COORDINATOR_NAME && process.env.COORDINATOR_CODE) {
+    identityConfigured = true;
+    return `coordinator-${process.env.COORDINATOR_NAME.toLowerCase().trim()}-${process.env.COORDINATOR_CODE.trim()}`;
+  }
+  identityConfigured = false;
+  return `coordinator-node-${port}`;
+}
+
 if (process.argv[2] !== undefined && !isNaN(Number(process.argv[2])) && process.argv[2].trim() !== '') {
-  // Modo numérico: node server.js {PUERTO} {URL_NGROK}
+  // Modo estándar requerido por docente: node server.js {PUERTO} [URL_NGROK] [SEED_URL]
   PORT = Number(process.argv[2]);
-  MY_URL = process.argv[3] || (process.env.PUBLIC_URL || `http://localhost:${PORT}`);
-  NODE_ID = (process.env.COORDINATOR_ID || (PORT >= 3000 && PORT <= 3025 ? String.fromCharCode(65 + (PORT - 3000)) : `coordinator-${PORT}`)).toUpperCase();
-  SEED_URL = null;
+  const arg3 = process.argv[3] ? process.argv[3].trim() : null;
+  const arg4 = process.argv[4] ? process.argv[4].trim() : null;
+
+  if (arg3 && arg3.startsWith('http')) {
+    MY_URL = arg3;
+    SEED_URL = arg4 && arg4.startsWith('http') ? arg4 : null;
+  } else {
+    MY_URL = `http://localhost:${PORT}`;
+    SEED_URL = arg3 && arg3.startsWith('http') ? arg3 : null;
+  }
+
+  NODE_ID = defaultCoordinatorId(PORT);
 } else {
-  // Modo con letra (formato principal: node server.js J 3000)
-  NODE_ID = process.argv[2] ? String(process.argv[2]).trim().toUpperCase() : "A";
+  // Modo de compatibilidad: node server.js {ID_O_LETRA} {PUERTO} [URL_NGROK/SEED]
+  const rawId = process.argv[2] ? String(process.argv[2]).trim() : defaultCoordinatorId(3000);
+  NODE_ID = rawId;
   PORT = Number(process.argv[3]) || 3000;
 
   const defaultUrl = (PORT === 3000 && process.env.PUBLIC_URL)
@@ -286,6 +311,7 @@ app.post("/register", onlyLeader, (req, res) => {
     heartbeatCount: (servers[name]?.heartbeatCount || 0) + 1,
     status: "active",
     capabilities: req.body.capabilities || servers[name]?.capabilities || [],  // C6
+    schemas: req.body.schemas || servers[name]?.schemas || {},
   };
 
   let clientIp = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.ip || req.socket?.remoteAddress || "127.0.0.1";
@@ -567,6 +593,7 @@ app.get("/api/stats", (req, res) => {
       isOnline: s.status === "active" && now - s.lastHeartbeat <= 15000,
       heartbeatCount: s.heartbeatCount || 1,
       capabilities: s.capabilities || [],  // C7
+      schemas: s.schemas || {},
     })),
   });
 });
@@ -708,6 +735,56 @@ app.get('/api/tasks', (req, res) => {
   res.json({ total: taskList.length, tasks: taskList });
 });
 
+// Plantillas estándar para capacidades de la clase y capacidades del grupo G8
+const STANDARD_TASK_SCHEMAS = {
+  vector_distance: {
+    description: "Distancia euclidiana entre 2 vectores 2D",
+    payload: { a: [0, 0], b: [3, 4] },
+    expectedResult: { distance: 5 },
+  },
+  http_latency: {
+    description: "Medición de latencia HTTP en ms vía GET",
+    payload: { url: "https://www.google.com" },
+    expectedResult: { ms: 42 },
+  },
+  text_stats: {
+    description: "Estadísticas de texto (longitud, palabras, vocales)",
+    payload: { text: "Sistemas Distribuidos Parcial 2026" },
+    expectedResult: { length: 34, words: 4, vowels: 12 },
+  },
+  math_operations: {
+    description: "Operaciones matemáticas básicas (add, subtract, multiply, divide)",
+    payload: { operation: "multiply", a: 6, b: 7 },
+    expectedResult: { result: 42 },
+  },
+  fetch_url: {
+    description: "Petición HTTP a URL externa",
+    payload: { url: "https://jsonplaceholder.typicode.com/todos/1" },
+    expectedResult: { status: 200, data: {} },
+  },
+  sorting: {
+    description: "Ordenamiento de arreglo de números",
+    payload: { numbers: [42, 12, 88, 3, 19, 7] },
+    expectedResult: { sorted: [3, 7, 12, 19, 42, 88] },
+  },
+  encryption: {
+    description: "Cifrado simple de texto",
+    payload: { text: "Mensaje Secreto", algorithm: "caesar", shift: 3 },
+    expectedResult: { encrypted: "Phqvdmh Vhfuhwr" },
+  },
+};
+
+// GET /api/task-templates — esquemas estándar y dinámicos reportados por workers
+app.get('/api/task-templates', (req, res) => {
+  const merged = { ...STANDARD_TASK_SCHEMAS };
+  Object.values(servers).forEach((s) => {
+    if (s.schemas && typeof s.schemas === 'object') {
+      Object.assign(merged, s.schemas);
+    }
+  });
+  res.json({ ok: true, templates: merged });
+});
+
 // ==========================================================================
 // PROTOCOLO DE DESCUBRIMIENTO DE COORDINADORES Y ELECCIÓN (BULLY)
 // ==========================================================================
@@ -716,6 +793,13 @@ app.get('/api/tasks', (req, res) => {
 function isHigherPriority(id1, id2) {
   if (!id2) return true;
   if (!id1) return false;
+
+  // Un nodo provisional (coordinator-node-*) no supera a uno configurado
+  const isTemp1 = String(id1).startsWith("coordinator-node-");
+  const isTemp2 = String(id2).startsWith("coordinator-node-");
+  if (isTemp1 && !isTemp2) return false;
+  if (!isTemp1 && isTemp2) return true;
+
   const num1 = Number(id1);
   const num2 = Number(id2);
   if (!isNaN(num1) && !isNaN(num2)) {
@@ -1364,6 +1448,75 @@ app.post("/kill", (req, res) => {
   setTimeout(() => process.exit(0), 100);
 });
 
+// Endpoint POST /coordinator/id y /coordinator/config -> Asignar/Cambiar identidad del coordinador desde la UI
+app.all(["/coordinator/id", "/coordinator/config"], (req, res) => {
+  if (req.method === "GET") {
+    return res.json({
+      ok: true,
+      id: NODE_ID,
+      nodeId: NODE_ID,
+      url: MY_URL,
+      port: PORT,
+      role,
+      currentLeader,
+    });
+  }
+
+  const { id, name, code, nombre, codigo } = req.body || {};
+  let newId = id;
+  const n = name || nombre;
+  const c = code || codigo;
+  if (!newId && n && c) {
+    newId = `coordinator-${String(n).toLowerCase().trim()}-${String(c).trim()}`;
+  } else if (!newId && n) {
+    newId = String(n).trim();
+  }
+
+  if (!newId || typeof newId !== "string" || !newId.trim()) {
+    return res.status(400).json({ ok: false, error: "ID inválido. Formato requerido: coordinator-{nombre}-{código}" });
+  }
+
+  newId = newId.trim();
+  const oldId = NODE_ID;
+  NODE_ID = newId;
+
+  logCoord(`Identidad del coordinador actualizada: [${oldId}] ➔ [${NODE_ID}]`);
+
+  recordMessage({
+    sender: "Sistema",
+    message: `Identidad del coordinador actualizada de [${oldId}] a [${NODE_ID}]`,
+    target: "Middleware",
+    type: "system_event",
+  });
+
+  identityConfigured = true;
+  NODE_ID = newId;
+
+  logCoord(`Identidad del coordinador asignada: [${oldId}] ➔ [${NODE_ID}]`);
+
+  recordMessage({
+    sender: "Sistema",
+    message: `Identidad del coordinador asignada: [${NODE_ID}]`,
+    target: "Middleware",
+    type: "system_event",
+  });
+
+  // Re-evaluar liderazgo en Bully con la nueva identidad
+  logCoord(`Activando protocolo de elección Bully para [${NODE_ID}]...`);
+  checkInitialLeader();
+
+  res.json({
+    ok: true,
+    oldId,
+    id: NODE_ID,
+    nodeId: NODE_ID,
+    url: MY_URL,
+    role,
+    currentLeader,
+    message: `Identidad actualizada a [${NODE_ID}]`,
+  });
+});
+
 // GET /election/status -> Consultar estado actual del coordinador y sus peers
 app.get("/election/status", (req, res) => {
   res.json(getElectionState());
@@ -1380,6 +1533,7 @@ app.get("/election/state", (req, res) => {
   }));
   res.status(200).json({
     id: NODE_ID,
+    identityConfigured,
     url: MY_URL,
     role: role,
     leader: currentLeader,
@@ -1391,6 +1545,10 @@ app.get("/election/state", (req, res) => {
 
 // Proclamarse líder del cluster y notificar a todos los pares
 async function becomeLeader() {
+  if (!identityConfigured) {
+    logCoord(`Proclamación de líder omitida: el nodo aún no tiene identidad asignada desde la UI.`);
+    return;
+  }
   setLeader(NODE_ID, currentTerm, "bully");
 
   const peerUrls = Object.keys(peers);
@@ -1457,6 +1615,10 @@ let electionAnswerReceived = false;
 
 // Iniciar algoritmo de elección Bully
 async function startElection(reason = "normal") {
+  if (!identityConfigured) {
+    logCoord(`Elección Bully en pausa: asigna tu identidad en la interfaz web para participar.`);
+    return;
+  }
   if (electionInProgress) return;
   electionInProgress = true;
   electionAnswerReceived = false;
@@ -1541,6 +1703,10 @@ async function startElection(reason = "normal") {
 
 // Verificación inicial de líder al arrancar el nodo
 async function checkInitialLeader() {
+  if (!identityConfigured) {
+    logCoord(`Estado: SIN IDENTIDAD. Esperando asignación en la interfaz web (http://localhost:${PORT}) para iniciar.`);
+    return;
+  }
   if (role === "leader") return;
 
   const peerList = Object.values(peers);
@@ -1826,6 +1992,10 @@ app.listen(PORT, async () => {
   await probeLocalPeers();
 
   setTimeout(() => {
-    checkInitialLeader();
+    if (identityConfigured) {
+      checkInitialLeader();
+    } else {
+      logCoord(`Servidor en espera de identidad. Ingresa tu Nombre y Código en http://localhost:${PORT} para iniciar.`);
+    }
   }, 400);
 });
