@@ -1060,7 +1060,7 @@ app.all(["/hello", "/election/hello", "/ping"], (req, res) => {
         lastSeen: Date.now(),
         failCount: 0,
       };
-      logCoord(`Coordinador detectado vía /hello: ${senderId || '?' } (${senderUrl})`);
+      logCoord(`Coordinador detectado vía /hello: ${senderId || '?'} (${senderUrl})`);
     } else {
       peers[senderUrl].lastSeen = Date.now();
       peers[senderUrl].failCount = 0;
