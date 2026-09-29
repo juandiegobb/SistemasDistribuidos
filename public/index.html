@@ -626,24 +626,75 @@
         const timeoutId = setTimeout(() => controller.abort(), 1600);
 
         try {
-          const res = await fetch(`${url}/election/state`, {
-            method: "GET",
-            headers: { 
-              "Accept": "application/json",
-              "ngrok-skip-browser-warning": "true"
-            },
-            signal: controller.signal
-          });
+          let res;
+          try {
+            res = await fetch(`${url}/election/state`, {
+              method: "GET",
+              headers: { 
+                "Accept": "application/json",
+                "ngrok-skip-browser-warning": "true"
+              },
+              signal: controller.signal
+            });
+          } catch (e) { }
+
+          // Fallback a /hello si /election/state no existe en el peer
+          if (!res || !res.ok) {
+            try {
+              res = await fetch(`${url}/hello`, {
+                method: "GET",
+                headers: { 
+                  "Accept": "application/json",
+                  "ngrok-skip-browser-warning": "true"
+                },
+                signal: controller.signal
+              });
+            } catch (e) { }
+          }
+
           clearTimeout(timeoutId);
 
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
+          if (!res || !res.ok) {
+            throw new Error(`HTTP ${res ? res.status : 'Timeout'}`);
           }
 
           const data = await res.json();
           const latency = Math.round(performance.now() - start);
 
-          // Aprender nuevos peers dinámicamente si los reporta
+          // Procesar peerDetails enriquecidos reportados por el coordinador (nuestro backend)
+          if (Array.isArray(data.peerDetails)) {
+            data.peerDetails.forEach(p => {
+              if (p && p.url) {
+                if (!knownCoordinators.has(p.url)) {
+                  knownCoordinators.add(p.url);
+                  addLog("DISCOVERY", `Nuevo coordinador descubierto en red: ${p.id ? '[' + p.id + '] ' : ''}${p.url}`);
+                }
+                const existing = coordinatorStates[p.url];
+                if (!existing) {
+                  coordinatorStates[p.url] = {
+                    id: p.id || "?",
+                    url: p.url,
+                    role: "follower",
+                    leader: data.leader || null,
+                    leaderUrl: data.leaderUrl || null,
+                    peers: [],
+                    isOnline: p.alive !== false,
+                    latency: 45,
+                    lastChecked: Date.now(),
+                    failCount: 0
+                  };
+                } else {
+                  if (p.id && p.id !== "?") coordinatorStates[p.url].id = p.id;
+                  if (p.alive !== false) {
+                    coordinatorStates[p.url].isOnline = true;
+                    coordinatorStates[p.url].failCount = 0;
+                  }
+                }
+              }
+            });
+          }
+
+          // Aprender nuevos peers dinámicamente si los reporta en arreglo simple
           if (Array.isArray(data.peers)) {
             data.peers.forEach(peer => {
               const peerUrl = typeof peer === "string" ? peer : peer?.url;
@@ -653,7 +704,6 @@
                   knownCoordinators.add(peerUrl);
                   addLog("DISCOVERY", `Nuevo coordinador descubierto en red: ${peerId ? '[' + peerId + '] ' : ''}${peerUrl}`);
                 }
-                // Si el peer viene identificado por el coordinador, pre-poblar su ID
                 if (peerId) {
                   if (!coordinatorStates[peerUrl]) {
                     coordinatorStates[peerUrl] = {
@@ -686,12 +736,13 @@
           }
 
           coordinatorStates[url] = {
-            id: data.id || "N/A",
+            id: data.id || data.nodeId || previousState?.id || "N/A",
             url: data.url || url,
             role: data.role || "follower",
-            leader: data.leader || null,
+            leader: data.leader || data.currentLeader || null,
             leaderUrl: data.leaderUrl || null,
             peers: data.peers || [],
+            peerDetails: data.peerDetails || [],
             isOnline: true,
             latency: latency,
             lastChecked: Date.now(),
@@ -703,18 +754,27 @@
           clearTimeout(timeoutId);
           const existing = coordinatorStates[url];
 
-          // Si el navegador no puede consultar directamente al peer remoto (ej. no implementa GET /election/state),
-          // pero nuestro coordinador backend lo reporta como vivo en sus peers:
-          const isReportedAliveByCluster = Object.values(coordinatorStates).some(c => 
-            c.isOnline && Array.isArray(c.peers) && c.peers.some(p => {
-              const pUrl = typeof p === "string" ? p : p?.url;
-              return pUrl === url && p.alive !== false;
-            })
-          );
+          // Buscar si algún nodo online del cluster conoce a este peer
+          const clusterPeerInfo = Object.values(coordinatorStates)
+            .filter(c => c.isOnline && Array.isArray(c.peerDetails))
+            .flatMap(c => c.peerDetails)
+            .find(p => p && p.url === url);
 
-          if (isReportedAliveByCluster && existing && existing.id && existing.id !== "?") {
-            // Mantenerlo online y con su ID real (ej: D)
+          const isReportedAliveByCluster = clusterPeerInfo 
+            ? (clusterPeerInfo.alive !== false)
+            : Object.values(coordinatorStates).some(c => 
+                c.isOnline && Array.isArray(c.peers) && c.peers.some(p => {
+                  const pUrl = typeof p === "string" ? p : p?.url;
+                  return pUrl === url && p.alive !== false;
+                })
+              );
+
+          const resolvedId = (clusterPeerInfo && clusterPeerInfo.id) || existing?.id;
+
+          if (isReportedAliveByCluster && existing) {
+            // Mantenerlo online y con su ID real (ej: A o D)
             existing.isOnline = true;
+            if (resolvedId && resolvedId !== "?") existing.id = resolvedId;
             existing.lastChecked = Date.now();
             existing.failCount = 0;
             return existing;
@@ -724,9 +784,9 @@
           const prevFail = existing?.failCount || 0;
           
           coordinatorStates[url] = {
-            id: existing?.id || "?",
+            id: resolvedId || existing?.id || "?",
             url: url,
-            role: "unknown",
+            role: existing?.role || "unknown",
             leader: null,
             leaderUrl: null,
             peers: existing?.peers || [],
@@ -741,8 +801,8 @@
             addLog("DEAD", `Coordinador en ${url} dejó de responder (Timeout/Caído)`);
           }
 
-          // Si un nodo no es el origen de la app y se apagó (falla 3 veces consecutivas), retirarlo de la interfaz
-          if (url !== window.location.origin && coordinatorStates[url].failCount >= 3) {
+          // Si un nodo no es el origen de la app y se apagó (falla 5 veces consecutivas y no es reportado vivo por el cluster), retirarlo
+          if (url !== window.location.origin && coordinatorStates[url].failCount >= 5 && !isReportedAliveByCluster) {
             knownCoordinators.delete(url);
             delete coordinatorStates[url];
           }
@@ -824,13 +884,49 @@
           }
         }
 
-        // 2. Si ninguno tiene rol "leader" directamente, buscar a quién reconocen la mayoría de los seguidores vivos
+        // 2. Si ninguno tiene rol "leader" directamente, buscar a quién reconocen los seguidores vivos en su campo 'leader' o 'leaderUrl'
         if (!newLeaderUrl) {
           for (const [url, state] of Object.entries(coordinatorStates)) {
-            if (state.isOnline && state.leaderUrl && coordinatorStates[state.leaderUrl]?.isOnline) {
-              newLeaderUrl = state.leaderUrl;
-              newLeaderId = state.leader;
-              break;
+            if (state.isOnline && state.leader && state.leader !== "?" && state.leader !== "N/A") {
+              const targetLeaderId = String(state.leader).toUpperCase();
+              // Buscar en coordinatorStates si algún nodo tiene este ID
+              const matchingEntry = Object.entries(coordinatorStates).find(([u, s]) => 
+                s.isOnline && s.id && String(s.id).toUpperCase() === targetLeaderId
+              );
+
+              if (matchingEntry) {
+                newLeaderUrl = matchingEntry[0];
+                newLeaderId = matchingEntry[1].id;
+                break;
+              } else if (state.leaderUrl) {
+                newLeaderUrl = state.leaderUrl;
+                newLeaderId = targetLeaderId;
+                break;
+              }
+            }
+          }
+        }
+
+        // 3. Fallback Bully: Si no hay líder explícito, el nodo online con ID alfabético mayor gana por consenso
+        if (!newLeaderUrl) {
+          const onlineCandidates = Object.entries(coordinatorStates)
+            .filter(([_, s]) => s.isOnline && s.id && s.id !== "?" && s.id !== "N/A");
+          if (onlineCandidates.length > 0) {
+            onlineCandidates.sort((a, b) => String(b[1].id).localeCompare(String(a[1].id)));
+            newLeaderUrl = onlineCandidates[0][0];
+            newLeaderId = onlineCandidates[0][1].id;
+          }
+        }
+
+        // Sincronizar roles en coordinatorStates para que la topología y tarjetas reflejen el líder
+        if (newLeaderId || newLeaderUrl) {
+          for (const [url, state] of Object.entries(coordinatorStates)) {
+            const isMatch = (newLeaderId && state.id && String(state.id).toUpperCase() === String(newLeaderId).toUpperCase()) ||
+                            (newLeaderUrl && (url === newLeaderUrl || url.replace(/\/+$/, '') === newLeaderUrl.replace(/\/+$/, '')));
+            if (isMatch) {
+              state.role = "leader";
+            } else if (state.role === "leader") {
+              state.role = "follower";
             }
           }
         }
@@ -907,8 +1003,12 @@
           const state = coordinatorStates[url] || { url, isOnline: false, role: "unknown", id: "?" };
           if (state.isOnline) aliveCount++;
 
-          const isLeader = state.isOnline && state.role === "leader";
-          const isFollower = state.isOnline && state.role !== "leader";
+          const isLeader = state.isOnline && (
+            state.role === "leader" ||
+            (activeLeaderId && state.id && String(state.id).toUpperCase() === String(activeLeaderId).toUpperCase()) ||
+            (activeLeaderUrl && (url === activeLeaderUrl || url.replace(/\/+$/, '') === activeLeaderUrl.replace(/\/+$/, '')))
+          );
+          const isFollower = state.isOnline && !isLeader;
           const isOffline = !state.isOnline;
 
           // Construir tarjeta
@@ -955,13 +1055,17 @@
                   const isPeerAlive = p.alive === true;
                   return `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono border ${isPeerAlive ? 'bg-slate-800/80 text-emerald-300 border-emerald-500/30' : 'bg-slate-900/80 text-slate-400 border-slate-700/60'}">${escapeHtml(nodeLabel)}</span>`;
                 }
-                return `<span class="bg-slate-800/80 px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-300 border border-slate-700/60">${escapeHtml(p)}</span>`;
+                const peerState = coordinatorStates[p] || Object.values(coordinatorStates).find(c => c.url === p);
+                const peerId = peerState?.id && peerState.id !== "?" ? peerState.id : null;
+                const nodeLabel = peerId ? `[${peerId}] ${p}` : p;
+                const isPeerAlive = peerState ? peerState.isOnline : true;
+                return `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono border ${isPeerAlive ? 'bg-slate-800/80 text-emerald-300 border-emerald-500/30' : 'bg-slate-900/80 text-slate-400 border-slate-700/60'}">${escapeHtml(nodeLabel)}</span>`;
               }).join(" ")
             : `<span class="text-slate-500 text-[11px] italic">Ninguno</span>`;
 
           const leaderRecognizedText = state.leader 
             ? `<strong class="text-emerald-300 font-mono">${escapeHtml(state.leader)}</strong> ${state.leaderUrl ? `(${escapeHtml(state.leaderUrl)})` : ''}`
-            : `<span class="text-slate-500">No definido</span>`;
+            : (isLeader ? `<strong class="text-emerald-300 font-mono">${escapeHtml(state.id || 'Este Nodo')}</strong> (Líder Supremo)` : `<span class="text-slate-500">No definido</span>`);
 
           // U2: Extraer puerto (no mostrar :80 para ngrok)
           let portDisplay = "";
@@ -1256,6 +1360,12 @@
 
           workersTableBody.appendChild(tr);
         });
+
+        // Actualizar dinámicamente opciones de tareas y workers disponibles
+        try {
+          updateTaskTypeOptions(workers);
+          updateTaskWorkerSelect(workers, taskTypeSelect ? taskTypeSelect.value : '');
+        } catch(e) {}
       }
 
       // ==========================================
@@ -1683,6 +1793,45 @@
 
       let lastTaskSnapshot = {}; // Para detectar cambios de estado
 
+      // Actualizar dinámicamente el selector de tipos de tarea con la unión de capacidades de los workers
+      function updateTaskTypeOptions(workers) {
+        if (!taskTypeSelect) return;
+        const currentVal = taskTypeSelect.value;
+        const allCaps = new Set(['vector_distance', 'http_latency']);
+
+        if (Array.isArray(workers)) {
+          workers.forEach(w => {
+            const isOnline = (w.status === "active" && (w.isOnline === true || (w.isOnline === undefined && (w.elapsedSeconds === undefined || w.elapsedSeconds <= 10))));
+            if (isOnline && Array.isArray(w.capabilities)) {
+              w.capabilities.forEach(cap => {
+                if (cap && typeof cap === 'string') allCaps.add(cap.trim());
+              });
+            }
+          });
+        }
+
+        const sortedCaps = Array.from(allCaps);
+        const existingOptions = Array.from(taskTypeSelect.options).map(o => o.value);
+        const hasChanged = sortedCaps.length !== existingOptions.length || sortedCaps.some((c, i) => c !== existingOptions[i]);
+
+        if (hasChanged) {
+          taskTypeSelect.innerHTML = sortedCaps.map(c => {
+            let label = c;
+            if (c === 'vector_distance') label = 'vector_distance (Juan Diego)';
+            else if (c === 'http_latency') label = 'http_latency (Paula)';
+            else label = `${c} (Worker externo)`;
+            return `<option value="${escapeHtml(c)}">${escapeHtml(label)}</option>`;
+          }).join('');
+
+          if (sortedCaps.includes(currentVal)) {
+            taskTypeSelect.value = currentVal;
+          } else {
+            taskTypeSelect.value = sortedCaps[0] || '';
+          }
+          buildPayloadFields(taskTypeSelect.value);
+        }
+      }
+
       // Construir campos dinámicos según el tipo de tarea
       function buildPayloadFields(type) {
         if (!payloadFields) return;
@@ -1701,7 +1850,11 @@
         } else if (type === 'http_latency') {
           payloadFields.innerHTML = `
             <label class="block text-xs font-semibold text-slate-300 mb-1">URL a medir</label>
-            <input id="latUrl" type="url" value="https://example.com" class="w-full bg-surface-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500" placeholder="https://...">`;
+            <input id="latUrl" type="url" value="https://google.com" class="w-full bg-surface-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-violet-500" placeholder="https://...">`;
+        } else {
+          payloadFields.innerHTML = `
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Payload JSON para <code>${escapeHtml(type)}</code></label>
+            <textarea id="customPayloadJson" rows="3" class="w-full bg-surface-900 border border-slate-700 rounded-lg p-2 font-mono text-xs text-white focus:outline-none focus:border-violet-500" placeholder='{"param": 123}'>{}</textarea>`;
         }
         updatePayloadPreview();
       }
@@ -1713,9 +1866,15 @@
             b: [parseFloat(document.getElementById('vecBx')?.value||3), parseFloat(document.getElementById('vecBy')?.value||4)]
           };
         } else if (type === 'http_latency') {
-          return { url: document.getElementById('latUrl')?.value || 'https://example.com' };
+          return { url: document.getElementById('latUrl')?.value || 'https://google.com' };
+        } else {
+          try {
+            const raw = document.getElementById('customPayloadJson')?.value || '{}';
+            return JSON.parse(raw);
+          } catch(e) {
+            return {};
+          }
         }
-        return {};
       }
 
       function updatePayloadPreview() {

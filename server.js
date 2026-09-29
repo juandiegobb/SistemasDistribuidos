@@ -50,13 +50,13 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==========================================================================
 // CONSTANTES DE TIEMPO DEL SISTEMA (sección 5 AGENTS.md) — C4
 // ==========================================================================
-const PING_INTERVAL_MS  = 2000;  // Intervalo de ping entre coordinadores
-const PING_TIMEOUT_MS   = 5000;  // Timeout de cada ping entre coordinadores
-const PING_RETRIES      = 3;     // Fallos consecutivos antes de eliminar un peer
+const PING_INTERVAL_MS = 2000;  // Intervalo de ping entre coordinadores
+const PING_TIMEOUT_MS = 5000;  // Timeout de cada ping entre coordinadores
+const PING_RETRIES = 3;     // Fallos consecutivos antes de eliminar un peer
 const PULSE_INTERVAL_MS = 3000;  // Intervalo de pulso worker → coordinador
-const PULSE_TIMEOUT_MS  = 8000;  // Timeout de pulso de worker (también en /servers)
-const PULSE_RETRIES     = 3;     // Fallos de pulso antes de marcar worker offline
-const TASK_TIMEOUT_MS   = 30000; // Timeout de tarea: 30 s sin resultado → "timeout"
+const PULSE_TIMEOUT_MS = 8000;  // Timeout de pulso de worker (también en /servers)
+const PULSE_RETRIES = 3;     // Fallos de pulso antes de marcar worker offline
+const TASK_TIMEOUT_MS = 30000; // Timeout de tarea: 30 s sin resultado → "timeout"
 
 // Identidad y Estado de Coordinador
 // Soporte directo: node server.js {ID_LETRA} {PUERTO} {URL_NGROK/SEED}
@@ -64,14 +64,14 @@ const TASK_TIMEOUT_MS   = 30000; // Timeout de tarea: 30 s sin resultado → "ti
 let NODE_ID, PORT, SEED_URL, MY_URL;
 if (process.argv[2] !== undefined && !isNaN(Number(process.argv[2])) && process.argv[2].trim() !== '') {
   // Modo numérico: node server.js {PUERTO} {URL_NGROK}
-  PORT     = Number(process.argv[2]);
-  MY_URL   = process.argv[3] || (process.env.PUBLIC_URL || `http://localhost:${PORT}`);
-  NODE_ID  = (process.env.COORDINATOR_ID || (PORT >= 3000 && PORT <= 3025 ? String.fromCharCode(65 + (PORT - 3000)) : `coordinator-${PORT}`)).toUpperCase();
+  PORT = Number(process.argv[2]);
+  MY_URL = process.argv[3] || (process.env.PUBLIC_URL || `http://localhost:${PORT}`);
+  NODE_ID = (process.env.COORDINATOR_ID || (PORT >= 3000 && PORT <= 3025 ? String.fromCharCode(65 + (PORT - 3000)) : `coordinator-${PORT}`)).toUpperCase();
   SEED_URL = null;
 } else {
   // Modo con letra (formato principal: node server.js J 3000)
-  NODE_ID  = process.argv[2] ? String(process.argv[2]).trim().toUpperCase() : "A";
-  PORT     = Number(process.argv[3]) || 3000;
+  NODE_ID = process.argv[2] ? String(process.argv[2]).trim().toUpperCase() : "A";
+  PORT = Number(process.argv[3]) || 3000;
 
   const defaultUrl = (PORT === 3000 && process.env.PUBLIC_URL)
     ? process.env.PUBLIC_URL
@@ -80,17 +80,17 @@ if (process.argv[2] !== undefined && !isNaN(Number(process.argv[2])) && process.
   if (process.argv[4]) {
     const arg4 = process.argv[4].trim();
     if (process.argv[5]) {
-      MY_URL   = arg4;
+      MY_URL = arg4;
       SEED_URL = process.argv[5].trim();
     } else if (arg4.includes("ngrok") || arg4.includes("loca.lt")) {
-      MY_URL   = arg4;
+      MY_URL = arg4;
       SEED_URL = null;
     } else {
-      MY_URL   = defaultUrl;
+      MY_URL = defaultUrl;
       SEED_URL = arg4;
     }
   } else {
-    MY_URL   = defaultUrl;
+    MY_URL = defaultUrl;
     SEED_URL = null;
   }
 }
@@ -615,9 +615,9 @@ app.post('/task/receive', onlyLeader, (req, res) => {
     };
     tasks[taskId] = task;
   } else {
-    task.status      = status === 'ok' ? 'ok' : 'error';
-    task.result      = result || null;
-    task.error       = error || null;
+    task.status = status === 'ok' ? 'ok' : 'error';
+    task.result = result || null;
+    task.error = error || null;
     task.completedAt = Date.now();
   }
   logCoord(`Resultado recibido: tarea ${taskId} → ${task.status}`);
@@ -643,7 +643,7 @@ app.post('/api/tasks', onlyLeader, async (req, res) => {
   // Determinar workers online con la capacidad requerida
   const candidates = Object.values(servers).filter((s) => {
     const isOnline = s.status === 'active' && (now - s.lastHeartbeat) <= TIMEOUT_MS;
-    const hasCap   = Array.isArray(s.capabilities) && s.capabilities.includes(taskType);
+    const hasCap = Array.isArray(s.capabilities) && s.capabilities.includes(taskType);
     return isOnline && hasCap;
   });
 
@@ -695,7 +695,7 @@ app.post('/api/tasks', onlyLeader, async (req, res) => {
     res.json({ ok: true, taskId, worker: targetWorker.name });
   } catch (err) {
     tasks[taskId].status = 'error';
-    tasks[taskId].error  = `Error al contactar al worker: ${err.message}`;
+    tasks[taskId].error = `Error al contactar al worker: ${err.message}`;
     tasks[taskId].completedAt = Date.now();
     logCoord(`Error asignando tarea ${taskId} a ${targetWorker.name}: ${err.message}`);
     res.status(502).json({ ok: false, error: `No se pudo contactar al worker: ${err.message}`, taskId });
@@ -784,30 +784,19 @@ function setLeader(newLeader, term, algo = "bully", options = {}) {
   }
 }
 
-// Obtener lista de peers formateada con { id, url, alive } (solo pares activos para evitar propagar caídos)
-function getFormattedPeers() {
+// Obtener lista de URLs de peers activos como arreglo de strings (requerido por contratos de red y compañeros)
+function getPeerUrls() {
   const now = Date.now();
   const TIMEOUT_MS = 6000;
-
   return Object.values(peers)
-    .filter((p) => (p.lastSeen || 0) > 0 && (now - p.lastSeen <= TIMEOUT_MS) && (p.failCount || 0) < 2)
-    .map((p) => {
-      let derivedId = p.id;
-      if (!derivedId && p.url) {
-        try {
-          const port = Number(new URL(p.url).port);
-          if (port >= 3000 && port <= 3025) {
-            derivedId = String.fromCharCode(65 + (port - 3000));
-          }
-        } catch (e) { }
-      }
+    .filter((p) => p && p.url && (p.lastSeen || 0) > 0 && (now - p.lastSeen <= TIMEOUT_MS) && (p.failCount || 0) < 2)
+    .map((p) => p.url)
+    .filter(Boolean);
+}
 
-      return {
-        id: derivedId || null,
-        url: p.url,
-        alive: true,
-      };
-    });
+// Obtener lista de peers (devuelve arreglo de URLs strings para compatibilidad estricta con compañeros y red)
+function getFormattedPeers() {
+  return getPeerUrls();
 }
 
 // Obtener estado serializable del nodo y su cluster
@@ -927,9 +916,9 @@ app.post("/election/ping", (req, res) => {
   }
 
   // Reconciliación de liderazgo Bully al recibir ping
-  const senderRole = from.role;
-  const senderTerm = from.term || 0;
-  const reportedLeader = from.currentLeader || from.leader;
+  const senderRole = fromObj.role || req.body?.role;
+  const senderTerm = fromObj.term || req.body?.term || 0;
+  const reportedLeader = fromObj.currentLeader || fromObj.leader || req.body?.currentLeader || req.body?.leader;
 
   if (senderRole === "leader" || (reportedLeader && isHigherPriority(reportedLeader, NODE_ID))) {
     const leaderToSet = senderRole === "leader" ? senderId : reportedLeader;
@@ -951,7 +940,7 @@ app.post("/election/ping", (req, res) => {
     }
   }
 
-  // Responder con acuse de recibo, identidad, rol, líder, término actual y peers con id, url, alive
+  // Responder con acuse de recibo, identidad, rol, líder, término actual y peers con URLs strings
   res.json({
     ok: true,
     id: NODE_ID,
@@ -962,7 +951,63 @@ app.post("/election/ping", (req, res) => {
     currentLeader,
     term: currentTerm,
     currentTerm,
-    peers: getFormattedPeers(),
+    peers: getPeerUrls(),
+  });
+});
+
+// ==========================================================================
+// ENDPOINT /hello Y /election/hello (Heartbeat y sondeo rápido de salud entre coordinadores)
+// ==========================================================================
+app.all(["/hello", "/election/hello", "/ping"], (req, res) => {
+  const fromObj = req.body?.from || {};
+  const senderUrl = fromObj.url || req.body?.url || req.query?.url;
+  const senderId = fromObj.id || req.body?.id || req.query?.id;
+  const senderLeader = fromObj.currentLeader || req.body?.currentLeader || req.body?.leader || req.query?.leader;
+  const senderRole = fromObj.role || req.body?.role || req.query?.role;
+  const senderTerm = fromObj.term || req.body?.term || req.query?.term;
+
+  if (senderUrl && senderUrl !== MY_URL && typeof senderUrl === "string" && senderUrl.startsWith("http")) {
+    deadPeers.delete(senderUrl);
+    const isNew = !peers[senderUrl];
+    if (isNew) {
+      peers[senderUrl] = {
+        id: senderId || null,
+        url: senderUrl,
+        lastSeen: Date.now(),
+        failCount: 0,
+      };
+      logCoord(`Coordinador detectado vía /hello: ${senderId || '?' } (${senderUrl})`);
+    } else {
+      peers[senderUrl].lastSeen = Date.now();
+      peers[senderUrl].failCount = 0;
+      if (senderId) peers[senderUrl].id = senderId;
+    }
+
+    // Reconciliación Bully si reportan líder
+    if (senderRole === "leader" || (senderLeader && isHigherPriority(senderLeader, NODE_ID))) {
+      const leaderToSet = senderRole === "leader" ? (senderId || senderLeader) : senderLeader;
+      if (isHigherPriority(NODE_ID, leaderToSet)) {
+        if (!electionInProgress && role !== "candidate") {
+          setTimeout(() => startElection("bully_superior_node"), 100);
+        }
+      } else if (NODE_ID !== leaderToSet) {
+        setLeader(leaderToSet, senderTerm !== undefined ? senderTerm : currentTerm, "bully", { fromElection: false, url: senderUrl });
+      }
+    }
+  }
+
+  res.status(200).json({
+    ok: true,
+    status: "ok",
+    id: NODE_ID,
+    nodeId: NODE_ID,
+    url: MY_URL,
+    role: role,
+    leader: currentLeader,
+    currentLeader: currentLeader,
+    term: currentTerm,
+    currentTerm: currentTerm,
+    peers: getPeerUrls(),
   });
 });
 
@@ -1240,27 +1285,77 @@ app.post("/election/message", (req, res) => {
     // Anuncio del nuevo líder electo
     const newLeader = payload.leader || from.id;
     const term = payload.term;
-    setLeader(newLeader, term !== undefined ? term : currentTerm, "bully", { fromElection: true });
+    if (newLeader === NODE_ID) {
+      setLeader(NODE_ID, term !== undefined ? term : currentTerm, "bully", { fromElection: true, url: MY_URL });
+      return;
+    }
+    if (isHigherPriority(NODE_ID, newLeader)) {
+      // Un nodo de menor jerarquía (ej. A) intenta anunciarse como líder cuando yo (J) estoy activo
+      logCoord(`Mensaje COORDINATOR de nodo inferior [${newLeader}] ignorado. Yo (${NODE_ID}) mantengo la prioridad.`);
+      if (role !== "leader") {
+        if (!electionInProgress && role !== "candidate") {
+          setTimeout(() => startElection("bully_superior_node"), 50);
+        }
+      } else {
+        sendElectionMessage(from.url, {
+          type: "COORDINATOR",
+          from: { id: NODE_ID, url: MY_URL },
+          payload: { leader: NODE_ID, url: MY_URL, term: currentTerm },
+        });
+      }
+      return;
+    }
+    setLeader(newLeader, term !== undefined ? term : currentTerm, "bully", { fromElection: true, url: from.url });
   }
 });
 
-// Endpoint POST /election/coordinator -> Anuncio de nuevo líder (compatibilidad)
-app.post("/election/coordinator", (req, res) => {
-  const { leader, url, term } = req.body;
-  if (!leader) {
-    return res.status(400).json({ error: "Campo 'leader' requerido" });
+// Endpoint POST /election/coordinator y /leader-announce -> Anuncio de nuevo líder (compatibilidad con compañeros)
+app.all(["/leader-announce", "/election/leader-announce", "/election/coordinator", "/coordinator", "/announce"], (req, res) => {
+  const body = req.body || {};
+  const newLeader = body.leader || body.newLeader || body.id || body.from?.id || body.data?.leader;
+  const leaderUrl = body.url || body.leaderUrl || body.from?.url || body.data?.url;
+  const term = body.term !== undefined ? body.term : (body.data?.term !== undefined ? body.data.term : currentTerm);
+
+  if (!newLeader) {
+    return res.status(400).json({ ok: false, error: "Campo 'leader' o 'id' requerido" });
   }
 
-  if (url && url !== MY_URL) {
-    peers[url] = {
-      id: leader,
-      url: url,
-      lastSeen: Date.now(),
-    };
+  if (leaderUrl && leaderUrl !== MY_URL && typeof leaderUrl === "string" && leaderUrl.startsWith("http")) {
+    deadPeers.delete(leaderUrl);
+    if (!peers[leaderUrl]) {
+      peers[leaderUrl] = {
+        id: newLeader,
+        url: leaderUrl,
+        lastSeen: Date.now(),
+        failCount: 0,
+      };
+    } else {
+      peers[leaderUrl].id = newLeader;
+      peers[leaderUrl].lastSeen = Date.now();
+      peers[leaderUrl].failCount = 0;
+    }
   }
 
-  setLeader(leader, term !== undefined ? term : currentTerm, "bully", { fromElection: true });
-  res.json({ ok: true });
+  // Reglas Bully para anuncios de líder:
+  if (newLeader === NODE_ID) {
+    setLeader(NODE_ID, term, "bully", { fromElection: true, url: MY_URL });
+    return res.status(200).json({ ok: true, leader: NODE_ID });
+  }
+
+  if (isHigherPriority(NODE_ID, newLeader)) {
+    // Un nodo de menor jerarquía (ej. A) intenta anunciarse como líder cuando yo (J) estoy activo
+    logCoord(`Anuncio de líder inferior [${newLeader}] recibido. Yo (${NODE_ID}) tengo mayor prioridad. Reclamando liderazgo.`);
+    res.status(200).json({ ok: false, error: "Higher priority node exists", leader: NODE_ID });
+
+    if (!electionInProgress && role !== "candidate") {
+      setTimeout(() => startElection("bully_superior_node"), 100);
+    }
+    return;
+  }
+
+  logCoord(`Nuevo líder electo aceptado vía anuncio: ${newLeader} (${leaderUrl || 'sin URL'})`);
+  setLeader(newLeader, term, "bully", { fromElection: true, url: leaderUrl });
+  res.status(200).json({ ok: true, leader: newLeader });
 });
 
 // Endpoint POST /kill -> Apagar este coordinador (simulación de caída para pruebas)
@@ -1277,13 +1372,20 @@ app.get("/election/status", (req, res) => {
 // GET /election/state -> Consultar estado del coordinador y lista de peers
 app.get("/election/state", (req, res) => {
   const leaderUrl = getLeaderUrl();
+  const now = Date.now();
+  const detailedPeers = Object.values(peers).map((p) => ({
+    id: p.id || null,
+    url: p.url,
+    alive: (p.lastSeen || 0) > 0 && (now - p.lastSeen <= 15000) && (p.failCount || 0) < 3,
+  }));
   res.status(200).json({
     id: NODE_ID,
     url: MY_URL,
     role: role,
     leader: currentLeader,
     leaderUrl: leaderUrl,
-    peers: getFormattedPeers(),
+    peers: getPeerUrls(),
+    peerDetails: detailedPeers,
   });
 });
 
@@ -1294,6 +1396,27 @@ async function becomeLeader() {
   const peerUrls = Object.keys(peers);
   await Promise.all(
     peerUrls.map(async (url) => {
+      // 1. POST /leader-announce (utilizado por compañeros de clase)
+      try {
+        await axios.post(`${url}/leader-announce`, {
+          leader: NODE_ID,
+          id: NODE_ID,
+          url: MY_URL,
+          term: currentTerm,
+        }, { timeout: 2000, headers: { "ngrok-skip-browser-warning": "true" } });
+      } catch (e) { }
+
+      // 2. POST /election/leader-announce
+      try {
+        await axios.post(`${url}/election/leader-announce`, {
+          leader: NODE_ID,
+          id: NODE_ID,
+          url: MY_URL,
+          term: currentTerm,
+        }, { timeout: 2000, headers: { "ngrok-skip-browser-warning": "true" } });
+      } catch (e) { }
+
+      // 3. POST /election/message
       try {
         await sendElectionMessage(url, {
           type: "COORDINATOR",
@@ -1306,14 +1429,24 @@ async function becomeLeader() {
         });
       } catch (err) { }
 
-      // Notificar también por /election/ping para coordinadores que solo atienden ese endpoint
+      // 4. POST /election/coordinator
+      try {
+        await axios.post(`${url}/election/coordinator`, {
+          leader: NODE_ID,
+          id: NODE_ID,
+          url: MY_URL,
+          term: currentTerm,
+        }, { timeout: 2000, headers: { "ngrok-skip-browser-warning": "true" } });
+      } catch (e) { }
+
+      // 5. Notificar también por /election/ping para coordinadores que solo atienden ese endpoint
       try {
         await axios.post(`${url}/election/ping`, {
           from: { id: NODE_ID, url: MY_URL, role: "leader", currentLeader: NODE_ID, term: currentTerm },
           role: "leader",
           currentLeader: NODE_ID,
           term: currentTerm,
-          peers: getFormattedPeers(),
+          peers: getPeerUrls(),
         }, { timeout: 2000, headers: { "ngrok-skip-browser-warning": "true" } });
       } catch (e) { }
     })
@@ -1554,7 +1687,24 @@ async function sendPeerPings() {
         });
       }
     } catch (err) {
-      if (peers[peerUrl]) {
+      let recovered = false;
+      try {
+        const helloRes = await axios.get(`${peerUrl}/hello`, {
+          timeout: 1500,
+          headers: { "ngrok-skip-browser-warning": "true" }
+        });
+        if (helloRes.data && (helloRes.data.ok || helloRes.status === 200)) {
+          recovered = true;
+          if (peers[peerUrl]) {
+            peers[peerUrl].lastSeen = Date.now();
+            peers[peerUrl].failCount = 0;
+            const peerId = helloRes.data.id || helloRes.data.nodeId || helloRes.data.from?.id;
+            if (peerId) peers[peerUrl].id = peerId;
+          }
+        }
+      } catch (e) { }
+
+      if (!recovered && peers[peerUrl]) {
         peers[peerUrl].failCount = (peers[peerUrl].failCount || 0) + 1;
         const elapsed = Date.now() - (peers[peerUrl].lastSeen || 0);
 
@@ -1623,7 +1773,7 @@ setInterval(() => {
         Object.values(tasks).forEach((t) => {
           if (t.worker === name && t.status === 'assigned') {
             t.status = 'error';
-            t.error  = `Worker ${name} se desconectó antes de completar la tarea`;
+            t.error = `Worker ${name} se desconectó antes de completar la tarea`;
             t.completedAt = Date.now();
             logCoord(`Tarea ${t.taskId} marcada como error por caída de ${name}`);
           }
